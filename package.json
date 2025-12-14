@@ -1,0 +1,41 @@
+{
+  "name": "sim-engine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Engine-agnostic simulation core (attempt -> consequence -> events) with a headless runner.",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "build:test": "tsc -p tsconfig.test.json",
+    "test": "npm run build:test && node --test dist-test/test/*.test.js",
+    "start": "npm run build && node dist/cli.js run --days 30 --seed 1",
+
+    "sim": "npm run build && node dist/cli.js run",
+    "sim:events": "npm run build && node dist/cli.js run --events --events-limit 200",
+    "sim:events:attempts": "npm run build && node dist/cli.js run --events --events-kind attempt.recorded --events-limit 200",
+    "sim:save-events": "npm run build && node dist/cli.js run --save-events",
+    "sim:log:summary": "npm run build && node dist/cli.js summarize-log",
+    "sim:story": "npm run build && node dist/cli.js story",
+
+    "sim:npcs": "npm run build && node dist/cli.js npcs",
+    "sim:npc": "npm run build && node dist/cli.js npc",
+    "sim:npc:history": "npm run build && node dist/cli.js npc-history",
+
+    "sim:npcs:villageA": "npm run build && node dist/cli.js npcs --days 0 --seed 1 --site HumanVillageA --limit 30",
+    "sim:npcs:villageB": "npm run build && node dist/cli.js npcs --days 0 --seed 1 --site HumanVillageB --limit 30",
+    "sim:npcs:port": "npm run build && node dist/cli.js npcs --days 0 --seed 1 --site HumanCityPort --limit 30",
+    "sim:npcs:elvenCity": "npm run build && node dist/cli.js npcs --days 0 --seed 1 --site ElvenCity --limit 30",
+    "sim:npcs:elvenTown": "npm run build && node dist/cli.js npcs --days 0 --seed 1 --site ElvenTownFortified --limit 30",
+
+    "sim:npc:example": "npm run build && node dist/cli.js npc --days 3 --seed 1 --id npc:25"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}
+
+
