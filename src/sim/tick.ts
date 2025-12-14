@@ -92,6 +92,15 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
   if (isEndOfDay) {
     const day = tickToDay(afterAttempts.tick);
     const sites: DailySummary["sites"] = Object.values(afterAttempts.sites).map((s) => {
+      const npcsHere = Object.values(afterAttempts.npcs).filter((n) => n.siteId === s.id);
+      const aliveNpcs = npcsHere.filter((n) => n.alive).length;
+      const deadNpcs = npcsHere.length - aliveNpcs;
+      const cultMembers = npcsHere.filter((n) => n.alive && n.cult.member).length;
+      const avgTrauma =
+        aliveNpcs > 0
+          ? npcsHere.filter((n) => n.alive).reduce((a, n) => a + n.trauma, 0) / aliveNpcs
+          : 0;
+
       if (s.kind !== "settlement") {
         return {
           siteId: s.id,
@@ -99,6 +108,10 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
           culture: s.culture,
           eclipsingPressure: s.eclipsingPressure,
           anchoringStrength: s.anchoringStrength,
+          aliveNpcs,
+          deadNpcs,
+          cultMembers,
+          avgTrauma,
           keyChanges: []
         };
       }
@@ -122,6 +135,10 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
         cultInfluence: s.cultInfluence,
         eclipsingPressure: s.eclipsingPressure,
         anchoringStrength: s.anchoringStrength,
+        aliveNpcs,
+        deadNpcs,
+        cultMembers,
+        avgTrauma,
         keyChanges: []
       };
     });

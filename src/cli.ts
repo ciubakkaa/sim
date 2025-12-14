@@ -84,7 +84,7 @@ function printHelp() {
       "  npcs --days <n> --seed <n> --site <siteId> [--limit <n>]",
       "  npc --days <n> --seed <n> --id <npcId>",
       "  summarize-log --file <path> [--sample-days <csv>] [--show-sites <csv>]",
-      "  npc-history --file <path> --id <npcId> [--limit <n>]",
+      "  npc-history --id <npcId> [--file <path>] [--limit <n>]  (defaults to latest logs/events-*.jsonl)",
       "  story <days>  (seed=1, saves all events JSONL, then prints summary)",
       "",
       "Notes:",
@@ -216,6 +216,11 @@ async function summarizeLog(filePath: string, opts: { sampleDays?: number[]; sho
           cult: s.cultInfluence,
           press: Math.round(s.eclipsingPressure),
           anchor: Math.round(s.anchoringStrength)
+          ,
+          aliveNpcs: s.aliveNpcs,
+          deadNpcs: s.deadNpcs,
+          cultMembers: s.cultMembers,
+          avgTrauma: s.avgTrauma !== undefined ? Math.round(s.avgTrauma) : undefined
         };
       })
     };
@@ -354,6 +359,19 @@ async function npcHistory(filePath: string, npcId: string, limit: number) {
   }
 }
 
+function pickLatestEventsLog(): string | undefined {
+  const dir = "logs";
+  if (!fs.existsSync(dir)) return undefined;
+  const files = fs
+    .readdirSync(dir)
+    .filter((f) => f.startsWith("events-") && f.endsWith(".jsonl"))
+    .map((f) => ({ f, p: path.join(dir, f) }))
+    .filter((x) => fs.existsSync(x.p));
+  if (!files.length) return undefined;
+  files.sort((a, b) => fs.statSync(b.p).mtimeMs - fs.statSync(a.p).mtimeMs);
+  return files[0]!.p;
+}
+
 async function main() {
   const { cmd, flags, positionals } = parseArgs(process.argv);
 
@@ -392,10 +410,10 @@ async function main() {
   }
 
   if (cmd === "npc-history") {
-    const file = strFlag(flags, "file");
+    const file = strFlag(flags, "file") ?? pickLatestEventsLog();
     const npcId = strFlag(flags, "id");
     if (!file) {
-      console.error("Missing required flag: --file <path>");
+      console.error("Missing required flag: --file <path> (and no logs/events-*.jsonl found)");
       process.exitCode = 1;
       return;
     }

@@ -186,6 +186,11 @@ export type DailySiteSummary = {
   cultInfluence?: number;
   eclipsingPressure: number;
   anchoringStrength: number;
+  // Phase 4 observability (named NPC layer)
+  aliveNpcs?: number;
+  deadNpcs?: number;
+  cultMembers?: number;
+  avgTrauma?: number;
   keyChanges: string[];
 };
 
