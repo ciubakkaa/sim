@@ -32,6 +32,8 @@ export type Cohorts = {
   elders: number;
 };
 
+export type DeathCause = "starvation" | "illness" | "murder" | "raid" | "unknown";
+
 export type SiteKind = "settlement" | "terrain" | "special" | "hideout";
 
 export type BaseSiteState = {
@@ -53,6 +55,7 @@ export type SettlementSiteState = BaseSiteState & {
 
   // 0..100
   sickness: number;
+  hunger: number; // 0..100, derived from unmet consumption over time
   unrest: number;
   morale: number;
 
@@ -68,6 +71,9 @@ export type SettlementSiteState = BaseSiteState & {
 
   // Rumor buffer (bounded). Used for “heard-about” relationship updates.
   rumors: SiteRumor[];
+
+  // Death counters for the last completed day (cohort-level, not named NPCs).
+  deathsToday: Partial<Record<DeathCause, number>>;
 };
 
 export type TerrainSiteState = BaseSiteState & {
@@ -153,6 +159,7 @@ export type EventKind =
   | "world.food.consumed"
   | "world.food.spoiled"
   | "world.population.changed"
+  | "world.migration"
   | "world.refugees.arrived"
   | "world.unrest.drifted"
   | "world.morale.drifted"
@@ -183,6 +190,7 @@ export type DailySiteSummary = {
   unrest?: number;
   morale?: number;
   sickness?: number;
+  hunger?: number;
   cultInfluence?: number;
   eclipsingPressure: number;
   anchoringStrength: number;
@@ -191,6 +199,7 @@ export type DailySiteSummary = {
   deadNpcs?: number;
   cultMembers?: number;
   avgTrauma?: number;
+  deathsToday?: Partial<Record<DeathCause, number>>;
   keyChanges: string[];
 };
 
@@ -302,7 +311,7 @@ export type NpcState = {
   alive: boolean;
   death?: {
     tick: SimTick;
-    cause: "murder" | "starvation" | "illness" | "raid" | "unknown";
+    cause: DeathCause;
     byNpcId?: NpcId;
     atSiteId?: SiteId;
   };

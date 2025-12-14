@@ -205,6 +205,9 @@ async function summarizeLog(filePath: string, opts: { sampleDays?: number[]; sho
       sites: filtered.map((s: any) => {
         const pop = (s.cohorts?.children ?? 0) + (s.cohorts?.adults ?? 0) + (s.cohorts?.elders ?? 0);
         const foodTot = s.foodTotals.grain + s.foodTotals.fish + s.foodTotals.meat;
+        const namedAlive = typeof s.aliveNpcs === "number" ? s.aliveNpcs : undefined;
+        const namedToCohortPct =
+          namedAlive !== undefined && pop > 0 ? Math.round((namedAlive / pop) * 100) : undefined;
         return {
           siteId: s.siteId,
           name: s.name,
@@ -213,6 +216,7 @@ async function summarizeLog(filePath: string, opts: { sampleDays?: number[]; sho
           unrest: s.unrest,
           morale: s.morale,
           sickness: s.sickness,
+          hunger: s.hunger,
           cult: s.cultInfluence,
           press: Math.round(s.eclipsingPressure),
           anchor: Math.round(s.anchoringStrength)
@@ -220,7 +224,9 @@ async function summarizeLog(filePath: string, opts: { sampleDays?: number[]; sho
           aliveNpcs: s.aliveNpcs,
           deadNpcs: s.deadNpcs,
           cultMembers: s.cultMembers,
-          avgTrauma: s.avgTrauma !== undefined ? Math.round(s.avgTrauma) : undefined
+          avgTrauma: s.avgTrauma !== undefined ? Math.round(s.avgTrauma) : undefined,
+          namedToCohortPct,
+          deathsToday: s.deathsToday
         };
       })
     };
@@ -229,6 +235,7 @@ async function summarizeLog(filePath: string, opts: { sampleDays?: number[]; sho
   console.log(`File: ${filePath}`);
   console.log(`Lines: ${totalLines}`);
   console.log(`Seed: ${seed ?? "unknown"}  LastTick: ${lastTick}  LastDay: ${lastDay}`);
+  console.log("Note: pop is cohort population; aliveNpcs/deadNpcs/cultMembers are tracked NPCs and may be far smaller.");
   console.log("");
 
   console.log("Top event kinds:");

@@ -34,6 +34,12 @@ export function applyFoodProcessHourly(world: WorldState, ctx: ProcessContext): 
         keyChanges.push(`${nextSite.name} has unmet food need (+${unmet.toFixed(2)}/h)`);
       }
 
+      // Hunger: rises with unmet need, decays slowly when fed.
+      // Keep recovery slow so a village doesn't instantly snap back to "fine" after one good hour.
+      const hungerDelta = unmet > 0 ? clamp(unmet * 18, 0, 12) : -0.5;
+      const nextHunger = clamp((nextSite.hunger ?? 0) + hungerDelta, 0, 100);
+      const withHunger: SettlementSiteState = { ...nextSite, hunger: nextHunger };
+
       const consumedTotals = res.consumed;
       events.push({
         id: makeId("evt", nextWorld.tick, ctx.nextEventSeq()),
@@ -42,12 +48,12 @@ export function applyFoodProcessHourly(world: WorldState, ctx: ProcessContext): 
         visibility: "system",
         siteId,
         message: `Food consumed at ${nextSite.name}`,
-        data: { consumed: consumedTotals, unmet }
+        data: { consumed: consumedTotals, unmet, hunger: nextHunger, hungerDelta }
       });
 
       nextWorld = {
         ...nextWorld,
-        sites: { ...nextWorld.sites, [siteId]: nextSite }
+        sites: { ...nextWorld.sites, [siteId]: withHunger }
       };
     }
 

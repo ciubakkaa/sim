@@ -1,5 +1,4 @@
 import { makeId } from "../ids";
-import { totalFood } from "../food";
 import { clamp } from "../util";
 import type { SettlementSiteState, SimEvent, WorldState } from "../types";
 import type { ProcessContext, ProcessResult } from "./types";
@@ -19,14 +18,12 @@ export function applyUnrestProcessHourly(world: WorldState, ctx: ProcessContext)
     if (!isSettlement(site)) continue;
 
     const pop = site.cohorts.children + site.cohorts.adults + site.cohorts.elders;
-    const totals = totalFood(site.food);
-    const stored = totals.grain + totals.fish + totals.meat;
-    const perCapitaStored = pop <= 0 ? 0 : stored / pop;
+    // Unrest should track experienced hardship (hunger), not "low pantry reserves".
+    const hunger = clamp(site.hunger ?? 0, 0, 100);
+    const hungerStress = (hunger / 100) * 1.6; // 0..1.6
+    const relief = hunger < 5 ? 0.6 : 0; // very mild calming when consistently fed
 
-    const hungerStress = clamp(2 - perCapitaStored, 0, 2); // stress if stored food < 2 units per person
-    const relief = clamp(perCapitaStored - 3, 0, 3);
-
-    const baseDelta = Math.round(hungerStress * 0.7 - relief * 0.3); // small hourly drift
+    const baseDelta = hungerStress * 0.9 - relief * 0.4; // small hourly drift
     const cultStress = Math.round((site.cultInfluence / 100) * 0.3);
     const pressureStress = Math.round((site.eclipsingPressure / 100) * 0.2);
     const sicknessStress = Math.round((site.sickness / 100) * 0.2);
@@ -53,7 +50,7 @@ export function applyUnrestProcessHourly(world: WorldState, ctx: ProcessContext)
       visibility: "system",
       siteId,
       message: `Unrest drifted at ${site.name}`,
-      data: { delta: unrestDelta, perCapitaStored, hungerStress, cultStress, pressureStress, sicknessStress }
+      data: { delta: unrestDelta, hunger, hungerStress, cultStress, pressureStress, sicknessStress }
     });
 
     events.push({

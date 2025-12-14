@@ -45,6 +45,13 @@ export function applyPopulationProcessDaily(world: WorldState, ctx: ProcessConte
   const settlementIds = world.map.sites.filter((id) => (world.sites[id] as any).kind === "settlement");
   const settlements = settlementIds.map((id) => nextWorld.sites[id]).filter(isSettlement);
 
+  // Reset daily death counters at day boundary.
+  for (const siteId of settlementIds) {
+    const s = nextWorld.sites[siteId];
+    if (!isSettlement(s)) continue;
+    nextWorld = { ...nextWorld, sites: { ...nextWorld.sites, [siteId]: { ...s, deathsToday: {} } } };
+  }
+
   // Refugee inflow (daily trickle).
   let refugees = ctx.rng.int(REFUGEE_DAILY_BASE_MIN, REFUGEE_DAILY_BASE_MAX);
   if (refugees > 0 && settlements.length) {
@@ -101,16 +108,41 @@ export function applyPopulationProcessDaily(world: WorldState, ctx: ProcessConte
     const total = totals.grain + totals.fish + totals.meat;
     const perCapitaStored = total / pop;
 
-    // Sickness drivers: hunger + overcrowding.
+    // Sickness drivers: hunger (experienced deficit) + overcrowding.
     const overcrowd = Math.max(0, pop - site.housingCapacity);
-    const hungerStress = clamp(1 - perCapitaStored / 2, 0, 1); // stressed if <2 units stored per person
     const crowdStress = clamp(overcrowd / Math.max(1, site.housingCapacity), 0, 1);
 
-    let sicknessDelta = Math.round(hungerStress * 6 + crowdStress * 3);
-    if (hungerStress < 0.1 && crowdStress < 0.05) sicknessDelta -= 2; // recover when stable
+    const hungerMeter = clamp(site.hunger ?? 0, 0, 100);
+    const hungerMeterStress = clamp(hungerMeter / 100, 0, 1);
+
+    // Reserve levels (perCapitaStored) should not directly cause sickness while people are eating.
+    // Use it only as a *weak* predictor of future risk.
+    const reserveStress = clamp(0.6 - perCapitaStored / 3, 0, 0.6); // 0..0.6
+
+    let sicknessDelta = Math.round(hungerMeterStress * 7 + crowdStress * 3 + reserveStress * 2);
+    if (hungerMeterStress < 0.05 && crowdStress < 0.05) sicknessDelta -= 2; // recover when fed and not crowded
     sicknessDelta += ctx.rng.int(-1, 1);
 
     const nextSickness = clamp(site.sickness + sicknessDelta, 0, 100);
+
+    // Starvation deaths (all cohorts): driven by the hunger meter (unmet consumption over time).
+    // This is what makes "people died" show up even when there's no combat.
+    let deathsStarvationChildren = 0;
+    let deathsStarvationAdults = 0;
+    let deathsStarvationElders = 0;
+    if (hungerMeter >= 70) {
+      // 0..~0.8% per day at extreme hunger
+      const rate = clamp((hungerMeter - 70) / 30, 0, 1) * 0.008;
+      const rollDeaths = (count: number, mult: number) => {
+        const expected = count * rate * mult;
+        let d = Math.floor(expected);
+        if (ctx.rng.next() < expected - d) d++;
+        return Math.min(d, count);
+      };
+      deathsStarvationChildren = rollDeaths(site.cohorts.children, 1.1);
+      deathsStarvationAdults = rollDeaths(site.cohorts.adults, 1.0);
+      deathsStarvationElders = rollDeaths(site.cohorts.elders, 1.4);
+    }
 
     // Elder deaths: base + sickness multiplier, explained as illness/old age.
     const elder = site.cohorts.elders;
@@ -133,17 +165,29 @@ export function applyPopulationProcessDaily(world: WorldState, ctx: ProcessConte
 
     const nextCohorts = {
       ...site.cohorts,
-      children: site.cohorts.children + births,
-      elders: site.cohorts.elders - deaths
+      children: site.cohorts.children + births - deathsStarvationChildren,
+      adults: site.cohorts.adults - deathsStarvationAdults,
+      elders: site.cohorts.elders - deaths - deathsStarvationElders
     };
 
     const updated: SettlementSiteState = {
       ...site,
       sickness: nextSickness,
-      cohorts: nextCohorts
+      cohorts: nextCohorts,
+      deathsToday: {
+        ...site.deathsToday,
+        illness: (site.deathsToday.illness ?? 0) + deaths,
+        starvation:
+          (site.deathsToday.starvation ?? 0) +
+          deathsStarvationChildren +
+          deathsStarvationAdults +
+          deathsStarvationElders
+      }
     };
 
     if (deaths > 0) keyChanges.push(`${site.name} lost ${deaths} elders (illness/old age)`);
+    const deathsStarvTotal = deathsStarvationChildren + deathsStarvationAdults + deathsStarvationElders;
+    if (deathsStarvTotal > 0) keyChanges.push(`${site.name} lost ${deathsStarvTotal} to starvation`);
     if (births > 0) keyChanges.push(`${site.name} had ${births} births`);
 
     nextWorld = { ...nextWorld, sites: { ...nextWorld.sites, [siteId]: updated } };
@@ -155,8 +199,112 @@ export function applyPopulationProcessDaily(world: WorldState, ctx: ProcessConte
       visibility: "system",
       siteId,
       message: `Population updated at ${site.name} (day ${day})`,
-      data: { births, deathsOldAge: deaths, sickness: nextSickness, overcrowd }
+      data: {
+        births,
+        deathsOldAge: deaths,
+        deathsStarvation: {
+          children: deathsStarvationChildren,
+          adults: deathsStarvationAdults,
+          elders: deathsStarvationElders
+        },
+        sickness: nextSickness,
+        hunger: hungerMeter,
+        overcrowd
+      }
     });
+  }
+
+  // Daily migration between settlements (cohort-level).
+  // People flee hunger/unrest and move toward safety/food/housing.
+  {
+    const settlements2 = settlementIds.map((id) => nextWorld.sites[id]).filter(isSettlement);
+    const byId: Record<string, SettlementSiteState> = Object.fromEntries(settlements2.map((s) => [s.id, s]));
+
+    type Move = { from: string; to: string; adults: number; children: number };
+    const moves: Move[] = [];
+
+    const attractiveness = (s: SettlementSiteState) => {
+      const pop = s.cohorts.children + s.cohorts.adults + s.cohorts.elders;
+      const totals = totalFood(s.food);
+      const stored = totals.grain + totals.fish + totals.meat;
+      const perCapitaStored = pop > 0 ? stored / pop : 0;
+      const housingSlack = Math.max(0, s.housingCapacity - pop);
+      return (
+        clamp(perCapitaStored * 25, 0, 80) +
+        clamp(housingSlack * 0.5, 0, 40) +
+        (100 - s.unrest) * 0.4 +
+        (100 - s.sickness) * 0.2
+      );
+    };
+
+    const pickDest = (fromId: string) => {
+      const from = byId[fromId];
+      const candidates = settlements2.filter((s) => s.id !== fromId && s.culture === from.culture);
+      const pool = candidates.length ? candidates : settlements2.filter((s) => s.id !== fromId);
+      const scored = pool.map((s) => ({ id: s.id, score: attractiveness(s) + ctx.rng.next() * 0.01 }));
+      scored.sort((a, b) => b.score - a.score);
+      return scored[0]?.id;
+    };
+
+    for (const s of settlements2) {
+      const pop = s.cohorts.children + s.cohorts.adults + s.cohorts.elders;
+      if (pop <= 0) continue;
+      const hunger = clamp(s.hunger ?? 0, 0, 100);
+      const fleePressure = clamp(hunger / 100, 0, 1) * 0.8 + clamp(s.unrest / 100, 0, 1) * 0.4;
+      const rate = clamp(fleePressure, 0, 1) * 0.02; // up to 2% per day
+      const expected = pop * rate;
+      let migrants = Math.floor(expected);
+      if (ctx.rng.next() < expected - migrants) migrants++;
+      if (migrants <= 0) continue;
+
+      const to = pickDest(s.id);
+      if (!to) continue;
+
+      const adultsMove = Math.min(s.cohorts.adults, Math.round(migrants * 0.75));
+      const childrenMove = Math.min(s.cohorts.children, migrants - adultsMove);
+      if (adultsMove + childrenMove <= 0) continue;
+
+      moves.push({ from: s.id, to, adults: adultsMove, children: childrenMove });
+    }
+
+    if (moves.length) {
+      for (const m of moves) {
+        const from = byId[m.from];
+        const to = byId[m.to];
+        byId[m.from] = {
+          ...from,
+          cohorts: {
+            ...from.cohorts,
+            adults: from.cohorts.adults - m.adults,
+            children: from.cohorts.children - m.children
+          }
+        };
+        byId[m.to] = {
+          ...to,
+          cohorts: {
+            ...to.cohorts,
+            adults: to.cohorts.adults + m.adults,
+            children: to.cohorts.children + m.children
+          }
+        };
+
+        keyChanges.push(`${from.name} -> ${to.name} migrated (${m.adults + m.children})`);
+        events.push({
+          id: makeId("evt", nextWorld.tick, ctx.nextEventSeq()),
+          tick: nextWorld.tick,
+          kind: "world.migration",
+          visibility: "system",
+          siteId: m.from,
+          message: `Migration from ${from.name} to ${to.name}`,
+          data: { from: m.from, to: m.to, adults: m.adults, children: m.children }
+        });
+      }
+
+      nextWorld = {
+        ...nextWorld,
+        sites: { ...nextWorld.sites, ...Object.fromEntries(Object.entries(byId)) }
+      };
+    }
   }
 
   return { world: nextWorld, events, keyChanges };

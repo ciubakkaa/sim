@@ -132,6 +132,7 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
         unrest: s.unrest,
         morale: s.morale,
         sickness: s.sickness,
+        hunger: s.hunger,
         cultInfluence: s.cultInfluence,
         eclipsingPressure: s.eclipsingPressure,
         anchoringStrength: s.anchoringStrength,
@@ -139,7 +140,8 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
         deadNpcs,
         cultMembers,
         avgTrauma,
-        keyChanges: []
+        keyChanges: [],
+        deathsToday: s.deathsToday
       };
     });
 

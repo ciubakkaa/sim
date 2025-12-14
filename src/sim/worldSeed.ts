@@ -17,6 +17,7 @@ function settlement(id: SiteId, name: string, culture: "human" | "elven", init: 
     cohorts: { children: 0, adults: 0, elders: 0 },
     housingCapacity: 0,
     sickness: 5,
+    hunger: 0,
     unrest: 10,
     morale: 60,
     cultInfluence: 0,
@@ -24,6 +25,7 @@ function settlement(id: SiteId, name: string, culture: "human" | "elven", init: 
     productionPerDay: { grain: 0, fish: 0, meat: 0 },
     fieldsCondition: 1,
     rumors: [],
+    deathsToday: {},
     ...(init as any)
   } as any;
 }

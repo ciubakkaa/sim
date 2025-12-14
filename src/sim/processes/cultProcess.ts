@@ -162,7 +162,8 @@ export function applyCultDaily(world: WorldState, ctx: ProcessContext): ProcessR
           ...mutated,
           cohorts: { ...mutated.cohorts, adults: mutated.cohorts.adults - adultLoss },
           unrest: clamp(mutated.unrest + 6, 0, 100),
-          morale: clamp(mutated.morale - 4, 0, 100)
+          morale: clamp(mutated.morale - 4, 0, 100),
+          deathsToday: { ...mutated.deathsToday, murder: (mutated.deathsToday.murder ?? 0) + adultLoss }
         };
         incidentEffects = { ...incidentEffects, adultLoss, victimNpcId: killRes.victimId };
         if (adultLoss) keyChanges.push(`${site.name} suffered a murder (+unrest)`);

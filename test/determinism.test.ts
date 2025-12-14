@@ -36,6 +36,9 @@ test("invariants: bounds + non-negative resources", () => {
       if (site.unrest !== undefined) {
         assert.ok(site.unrest >= 0 && site.unrest <= 100, "unrest must be 0..100");
       }
+      if (site.hunger !== undefined) {
+        assert.ok(site.hunger >= 0 && site.hunger <= 100, "hunger must be 0..100");
+      }
       if (site.cultInfluence !== undefined) {
         assert.ok(site.cultInfluence >= 0 && site.cultInfluence <= 100, "cultInfluence must be 0..100");
       }
