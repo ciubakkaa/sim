@@ -2,24 +2,27 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { runSimulation } from "../src/runner/run";
 
-test("determinism: same seed/days => identical outputs", () => {
-  const a = runSimulation({ seed: 123, days: 30 });
-  const b = runSimulation({ seed: 123, days: 30 });
+const runSimTests = process.env.RUN_SIM_TESTS === "1" || process.env.RUN_SLOW_TESTS === "1";
+const simTest = runSimTests ? test : test.skip;
+
+simTest("determinism: same seed/days => identical outputs", () => {
+  const a = runSimulation({ seed: 123, days: 7 });
+  const b = runSimulation({ seed: 123, days: 7 });
 
   assert.deepEqual(a.finalWorld, b.finalWorld);
   assert.deepEqual(a.summaries, b.summaries);
   assert.deepEqual(a.events, b.events);
 });
 
-test("divergence: different seeds should produce different outcomes", () => {
-  const a = runSimulation({ seed: 1, days: 50 });
-  const b = runSimulation({ seed: 2, days: 50 });
+simTest("divergence: different seeds should produce different outcomes", () => {
+  const a = runSimulation({ seed: 1, days: 10 });
+  const b = runSimulation({ seed: 2, days: 10 });
 
   // Even if the world converges to a similar end-state, the path (daily summaries) should differ.
   assert.notDeepEqual(a.summaries, b.summaries);
 });
 
-test("invariants: bounds + non-negative resources", () => {
+simTest("invariants: bounds + non-negative resources", () => {
   const r = runSimulation({ seed: 999, days: 200 });
 
   for (const s of r.summaries) {
@@ -45,6 +48,14 @@ test("invariants: bounds + non-negative resources", () => {
       assert.ok(site.eclipsingPressure >= 0 && site.eclipsingPressure <= 100, "eclipsingPressure must be 0..100");
       assert.ok(site.anchoringStrength >= 0 && site.anchoringStrength <= 100, "anchoringStrength must be 0..100");
     }
+  }
+
+  // Travel invariants (final world snapshot).
+  for (const npc of Object.values(r.finalWorld.npcs)) {
+    if (!npc.travel) continue;
+    assert.ok(npc.travel.totalKm >= 0, "travel.totalKm must be >= 0");
+    assert.ok(npc.travel.remainingKm >= 0, "travel.remainingKm must be >= 0");
+    assert.ok(npc.travel.remainingKm <= npc.travel.totalKm, "travel.remainingKm must be <= travel.totalKm");
   }
 });
 

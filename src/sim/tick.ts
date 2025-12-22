@@ -5,6 +5,11 @@ import { applyAutomaticProcesses } from "./processes";
 import { makeId } from "./ids";
 import { computeNpcNeeds, selectActiveNpcs } from "./npcs";
 import { generateReflexAttempt, resolveAndApplyAttempt } from "./attempts";
+import { progressTravelHourly, isNpcTraveling } from "./movement";
+import { progressDetentionHourly, progressEclipsingHourly } from "./eclipsing";
+import { decayBeliefsDaily } from "./beliefs";
+import { applyNotabilityFromEvents, decayNotabilityDaily } from "./notability";
+import { updateStates } from "./states/engine";
 
 export type TickOptions = {
   attempts?: Attempt[];
@@ -31,27 +36,27 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
     });
   }
 
-  // Record attempts (resolution pipeline is added in Phase 3/4; for now we just log).
-  for (const a of opts.attempts ?? []) {
-    events.push({
-      id: makeId("evt", world.tick, nextEventSeq()),
-      tick: world.tick,
-      kind: "attempt.recorded",
-      visibility: a.visibility,
-      message: `Attempt recorded: ${a.kind}`,
-      data: { attempt: a },
-      siteId: a.siteId
-    });
-  }
-
   const advancedWorld: WorldState = { ...world, tick: nextTick };
 
   const proc = applyAutomaticProcesses(advancedWorld, { rng, nextEventSeq });
   events.push(...proc.events);
   keyChanges.push(...proc.keyChanges);
 
+  // Travel progresses with time (Phase 1.2). Travelers aren't considered "in any site" until arrival.
+  const moved = progressTravelHourly(proc.world, { rng, nextEventSeq });
+  events.push(...moved.events);
+  keyChanges.push(...moved.keyChanges);
+
+  const detention = progressDetentionHourly(moved.world, { rng, nextEventSeq });
+  events.push(...detention.events);
+  keyChanges.push(...detention.keyChanges);
+
+  const eclipsing = progressEclipsingHourly(detention.world, { rng, nextEventSeq });
+  events.push(...eclipsing.events);
+  keyChanges.push(...eclipsing.keyChanges);
+
   // Phase 4: update NPC needs, select active NPCs, generate reflex attempts.
-  let withNeeds = proc.world;
+  let withNeeds = eclipsing.world;
   {
     const nextNpcs = { ...withNeeds.npcs };
     for (const npc of Object.values(withNeeds.npcs)) {
@@ -85,14 +90,32 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
     keyChanges.push(...res.keyChanges);
   }
 
+  // Reactive state updates (v2 AI system): triggers from this tick's events and world diffs.
+  afterAttempts = updateStates(afterAttempts, withNeeds, events);
+
+  // Notability promotion from notable events (Phase 4.4 minimal).
+  afterAttempts = applyNotabilityFromEvents(afterAttempts, events);
+
   const hourOfDay = tickToHourOfDay(afterAttempts.tick);
   const isEndOfDay = hourOfDay === 23;
 
   let dailySummary: DailySummary | undefined;
   if (isEndOfDay) {
+    // Daily belief decay (Phase 3.5 minimal).
+    {
+      const nextNpcs = { ...afterAttempts.npcs };
+      for (const n of Object.values(afterAttempts.npcs)) {
+        if (!n.alive) continue;
+        nextNpcs[n.id] = decayBeliefsDaily(n, afterAttempts.tick);
+      }
+      afterAttempts = { ...afterAttempts, npcs: nextNpcs };
+    }
+
+    afterAttempts = decayNotabilityDaily(afterAttempts);
+
     const day = tickToDay(afterAttempts.tick);
     const sites: DailySummary["sites"] = Object.values(afterAttempts.sites).map((s) => {
-      const npcsHere = Object.values(afterAttempts.npcs).filter((n) => n.siteId === s.id);
+      const npcsHere = Object.values(afterAttempts.npcs).filter((n) => n.siteId === s.id && !isNpcTraveling(n));
       const aliveNpcs = npcsHere.filter((n) => n.alive).length;
       const deadNpcs = npcsHere.length - aliveNpcs;
       const cultMembers = npcsHere.filter((n) => n.alive && n.cult.member).length;
@@ -149,18 +172,18 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
       tick: afterAttempts.tick,
       day,
       hourOfDay,
-      keyChanges: keyChanges.length ? keyChanges : ["No significant changes"],
+    keyChanges: keyChanges.length ? keyChanges : ["No significant changes"],
       sites
-    };
+  };
 
-    events.push({
+  events.push({
       id: makeId("evt", afterAttempts.tick, nextEventSeq()),
       tick: afterAttempts.tick,
-      kind: "sim.day.ended",
-      visibility: "system",
+    kind: "sim.day.ended",
+    visibility: "system",
       message: `Day ${day} ended`,
       data: { summary: dailySummary }
-    });
+  });
   }
 
   return { world: afterAttempts, events, dailySummary };

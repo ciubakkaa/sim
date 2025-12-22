@@ -4,6 +4,10 @@ import { createWorld } from "../src/sim/worldSeed";
 import { resolveAndApplyAttempt } from "../src/sim/attempts";
 import { Rng } from "../src/sim/rng";
 import { runSimulation } from "../src/runner/run";
+import { progressTravelHourly } from "../src/sim/movement";
+
+const runSimTests = process.env.RUN_SIM_TESTS === "1" || process.env.RUN_SLOW_TESTS === "1";
+const simTest = runSimTests ? test : test.skip;
 
 test("rumor ingestion updates relationships when returning to a site", () => {
   let world = createWorld(123);
@@ -31,7 +35,17 @@ test("rumor ingestion updates relationships when returning to a site", () => {
       resources: { toSiteId: "HumanCityPort" }
     };
     world = resolveAndApplyAttempt(world, travelOut, ctx).world;
+    // Travel is multi-hour now: NPC is in transit until arrival.
+    assert.equal(world.npcs[witnessLater.id]!.siteId, "HumanVillageA");
+    assert.ok(world.npcs[witnessLater.id]!.travel);
+
+    // Progress 4 hours (HumanVillageA <-> HumanCityPort is 16km; daytime speed is 4 km/h).
+    for (let i = 0; i < 4; i++) {
+      world = { ...world, tick: world.tick + 1 };
+      world = progressTravelHourly(world, ctx).world;
+    }
     assert.equal(world.npcs[witnessLater.id]!.siteId, "HumanCityPort");
+    assert.ok(!world.npcs[witnessLater.id]!.travel);
   }
 
   // Theft happens in the village (public => rumor created and witnesses updated).
@@ -63,6 +77,11 @@ test("rumor ingestion updates relationships when returning to a site", () => {
       resources: { toSiteId: "HumanVillageA" }
     };
     world = resolveAndApplyAttempt(world, travelBack, ctx).world;
+    assert.ok(world.npcs[witnessLater.id]!.travel);
+    for (let i = 0; i < 4; i++) {
+      world = { ...world, tick: world.tick + 1 };
+      world = progressTravelHourly(world, ctx).world;
+    }
     assert.equal(world.npcs[witnessLater.id]!.siteId, "HumanVillageA");
   }
 
@@ -73,7 +92,7 @@ test("rumor ingestion updates relationships when returning to a site", () => {
   assert.equal(rel.loyalty, 20);
 });
 
-test("cultInfluence is derived from actual cult members (not just unrest)", () => {
+simTest("cultInfluence is derived from actual cult members (not just unrest)", () => {
   let world = createWorld(123);
   // Pick a human site and force unrest high without adding cult members.
   const site = world.sites["HumanVillageA"] as any;

@@ -22,7 +22,7 @@ export const REFUGEE_DAILY_BASE_MIN = 0;
 export const REFUGEE_DAILY_BASE_MAX = 2;
 
 // Cult incident baseline rate (scaled further by influence/pressure/anchoring).
-export const CULT_INCIDENT_BASE_CHANCE_PER_DAY = 0.04;
+export const CULT_INCIDENT_BASE_CHANCE_PER_DAY = 0.08;
 
 // Diffusion tuning (km scale where influence decays noticeably).
 export const DIFFUSION_KM_SCALE = 20;

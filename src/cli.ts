@@ -83,6 +83,7 @@ function printHelp() {
       "      [--save-events] [--events-out <path>]",
       "  npcs --days <n> --seed <n> --site <siteId> [--limit <n>]",
       "  npc --days <n> --seed <n> --id <npcId>",
+      "      (npc/npcs now display travel/detention/eclipsing/busy/hp/beliefs)",
       "  summarize-log --file <path> [--sample-days <csv>] [--show-sites <csv>]",
       "  npc-history --id <npcId> [--file <path>] [--limit <n>]  (defaults to latest logs/events-*.jsonl)",
       "  story <days>  (seed=1, saves all events JSONL, then prints summary)",
@@ -117,6 +118,7 @@ function parseCsvList(s?: string): string[] | undefined {
 async function summarizeLog(filePath: string, opts: { sampleDays?: number[]; showSites?: string[] }) {
   const counts: Record<string, number> = {};
   const incidentByType: Record<string, number> = {};
+  const travelEncounterByType: Record<string, number> = {};
   const attemptByKind: Record<string, number> = {};
   const attemptByActor: Record<string, number> = {};
 
@@ -155,6 +157,11 @@ async function summarizeLog(filePath: string, opts: { sampleDays?: number[]; sho
     if (e.kind === "world.incident") {
       const t = e.data?.type ?? "unknown";
       incidentByType[t] = (incidentByType[t] ?? 0) + 1;
+    }
+
+    if (e.kind === "travel.encounter") {
+      const t = e.data?.encounterKind ?? e.data?.kind ?? e.data?.encounter ?? e.data?.type ?? "unknown";
+      travelEncounterByType[String(t)] = (travelEncounterByType[String(t)] ?? 0) + 1;
     }
 
     if (e.kind === "attempt.recorded") {
@@ -246,6 +253,12 @@ async function summarizeLog(filePath: string, opts: { sampleDays?: number[]; sho
   const incEntries = Object.entries(incidentByType);
   if (!incEntries.length) console.log("- (none)");
   else for (const [k, v] of incEntries.sort((a, b) => b[1] - a[1])) console.log(`- ${k}: ${v}`);
+  console.log("");
+
+  console.log("Travel encounters by type:");
+  const teEntries = Object.entries(travelEncounterByType);
+  if (!teEntries.length) console.log("- (none)");
+  else for (const [k, v] of teEntries.sort((a, b) => b[1] - a[1])) console.log(`- ${k}: ${v}`);
   console.log("");
 
   console.log("Top attempt kinds:");
@@ -475,10 +488,15 @@ async function main() {
       const needs = n.needs;
       const topNeed = Object.entries(needs).sort((a, b) => (b[1] as number) - (a[1] as number))[0];
       const status = n.alive ? "alive" : `dead(${n.death?.cause ?? "unknown"})`;
+      const travelStr = n.travel ? `travel(${n.travel.from}->${n.travel.to} remKm=${n.travel.remainingKm.toFixed(1)} q=${n.travel.edgeQuality})` : "";
+      const detainedStr = n.status?.detained ? `detained(until=t${n.status.detained.untilTick})` : "";
+      const eclipsingStr = n.status?.eclipsing ? `eclipsing(done=t${n.status.eclipsing.completeTick})` : "";
+      const busyStr = n.busyUntilTick > res.finalWorld.tick ? `busy(until=t${n.busyUntilTick} kind=${n.busyKind ?? "?"})` : "";
+      const flags = [travelStr, detainedStr, eclipsingStr, busyStr].filter(Boolean).join(" ");
       console.log(
-        `- ${n.id} | ${status} | ${n.name} | ${n.category} | notability=${n.notability.toFixed(0)} | topNeed=${topNeed?.[0]}(${Number(
+        `- ${n.id} | ${status} | ${n.name} | ${n.category} | hp=${Math.round(n.hp)}/${n.maxHp} | notability=${n.notability.toFixed(0)} | beliefs=${n.beliefs.length} | topNeed=${topNeed?.[0]}(${Number(
           topNeed?.[1] ?? 0
-        ).toFixed(0)})`
+        ).toFixed(0)})${flags ? ` | ${flags}` : ""}`
       );
     }
     if (npcs.length > limit) console.log(`\n... (${npcs.length - limit} more)`);
@@ -504,12 +522,17 @@ async function main() {
     console.log(`siteId=${n.siteId}`);
     console.log(`alive=${n.alive}`);
     if (!n.alive) console.log(`death=${JSON.stringify(n.death)}`);
+    console.log(`hp=${Math.round(n.hp)}/${n.maxHp}`);
     console.log(`notability=${n.notability}`);
     console.log(`cult=${JSON.stringify(n.cult)}`);
+    if (n.travel) console.log(`travel=${JSON.stringify(n.travel)}`);
+    if (n.status) console.log(`status=${JSON.stringify(n.status)}`);
+    console.log(`busyUntilTick=${n.busyUntilTick}${n.busyKind ? ` busyKind=${n.busyKind}` : ""}`);
     console.log(`trauma=${n.trauma}`);
     console.log("");
     console.log("needs:", n.needs);
     console.log("traits:", n.traits);
+    console.log(`beliefs.count=${n.beliefs.length}`);
     console.log(`relationships.materialized=${Object.keys(n.relationships).length}`);
     return;
   }
@@ -530,11 +553,11 @@ async function main() {
     for (const site of s.sites) {
       if (!site.cohorts || !site.foodTotals) continue;
       const pop = site.cohorts.children + site.cohorts.adults + site.cohorts.elders;
-      console.log(
+    console.log(
         `  - ${site.name} (${site.culture}) pop=${pop} food[g=${site.foodTotals.grain}, f=${site.foodTotals.fish}, m=${site.foodTotals.meat}] unrest=${site.unrest?.toFixed(
           0
         )} cult=${site.cultInfluence?.toFixed(0)} press=${site.eclipsingPressure.toFixed(0)} anchor=${site.anchoringStrength.toFixed(0)}`
-      );
+    );
     }
   }
 

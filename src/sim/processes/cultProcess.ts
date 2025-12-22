@@ -10,13 +10,22 @@ function isSettlement(site: unknown): site is SettlementSiteState {
   return Boolean(site && (site as SettlementSiteState).kind === "settlement");
 }
 
-type IncidentType = "arson_fields" | "theft_food" | "murder" | "intimidation";
+type IncidentType =
+  | "arson_fields"
+  | "theft_food"
+  | "murder"
+  | "intimidation"
+  | "graffiti"
+  | "threats";
 
 function pickIncidentType(ctx: ProcessContext): IncidentType {
   const r = ctx.rng.int(1, 100);
-  if (r <= 30) return "theft_food";
-  if (r <= 55) return "intimidation";
-  if (r <= 80) return "arson_fields";
+  // Mostly minor; major incidents are rarer.
+  if (r <= 22) return "graffiti";
+  if (r <= 44) return "threats";
+  if (r <= 66) return "theft_food";
+  if (r <= 86) return "intimidation";
+  if (r <= 95) return "arson_fields";
   return "murder";
 }
 
@@ -107,8 +116,12 @@ export function applyCultDaily(world: WorldState, ctx: ProcessContext): ProcessR
     });
 
     // Incident generator (low-level harm).
-    const incidentChance =
-      CULT_INCIDENT_BASE_CHANCE_PER_DAY * (smoothed / 100) * (site.eclipsingPressure / 100) * anchorBlock;
+    // Important: do not hard-gate incidents on eclipsing pressure.
+    // Pressure should *amplify* incidents, but low-pressure cults still sabotage.
+    const influenceFactor = clamp(0.15 + (smoothed / 100) * 0.85, 0.15, 1);
+    const pressureFactor = clamp(0.6 + (site.eclipsingPressure / 100) * 0.4, 0.6, 1);
+    const anchorFactor = clamp(0.5 + anchorBlock * 0.5, 0.2, 1);
+    const incidentChance = CULT_INCIDENT_BASE_CHANCE_PER_DAY * influenceFactor * pressureFactor * anchorFactor;
 
     if (ctx.rng.chance(incidentChance)) {
       const incidentType = pickIncidentType(ctx);
@@ -187,6 +200,18 @@ export function applyCultDaily(world: WorldState, ctx: ProcessContext): ProcessR
         } else {
           keyChanges.push(`${site.name} intimidated by cult agents`);
         }
+      }
+
+      if (incidentType === "graffiti") {
+        mutated = { ...mutated, unrest: clamp(mutated.unrest + 1, 0, 100), morale: clamp(mutated.morale - 1, 0, 100) };
+        incidentEffects = { ...incidentEffects, note: "Symbols and warnings appeared overnight" };
+        keyChanges.push(`${site.name} vandalized with cult symbols`);
+      }
+
+      if (incidentType === "threats") {
+        mutated = { ...mutated, unrest: clamp(mutated.unrest + 2, 0, 100) };
+        incidentEffects = { ...incidentEffects, note: "Threats delivered to locals" };
+        keyChanges.push(`${site.name} shaken by threats`);
       }
 
       nextWorld = { ...nextWorld, sites: { ...nextWorld.sites, [siteId]: mutated } };

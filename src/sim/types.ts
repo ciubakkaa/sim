@@ -7,6 +7,10 @@
  * Tick cadence: 1 tick = 1 hour.
  */
 
+import type { ActiveGoal } from "./goals/types";
+import type { ActiveState } from "./states/types";
+import type { ProficiencyDomain } from "./proficiency/types";
+
 export type SimTick = number; // 1 tick = 1 hour
 
 export type EntityId = string;
@@ -99,6 +103,7 @@ export type MapEdge = {
   from: SiteId;
   to: SiteId;
   km: number;
+  quality?: "road" | "rough";
 };
 
 export type WorldMap = {
@@ -117,8 +122,20 @@ export type WorldState = {
   npcs: Record<NpcId, NpcState>;
 };
 
+export type TravelState = {
+  kind: "travel";
+  from: SiteId;
+  to: SiteId;
+  totalKm: number;
+  remainingKm: number;
+  edgeQuality: "road" | "rough";
+  startedTick: SimTick;
+  lastProgressTick: SimTick;
+};
+
 export type AttemptKind =
   | "travel"
+  | "patrol"
   | "work_farm"
   | "work_fish"
   | "work_hunt"
@@ -155,6 +172,7 @@ export type Attempt = {
 export type EventKind =
   | "sim.started"
   | "sim.day.ended"
+  | "travel.encounter"
   | "world.food.produced"
   | "world.food.consumed"
   | "world.food.spoiled"
@@ -308,6 +326,39 @@ export type NpcState = {
   category: NpcCategory;
   siteId: SiteId;
 
+  // Home site tracking (Requirement 9). The NPC's permanent home location.
+  // Used for Belonging need calculation and home-return behavior.
+  homeSiteId: SiteId;
+
+  awayFromHomeSinceTick?: SimTick;
+  familyIds: NpcId[];
+
+  // AI state (scoring/states/goals/proficiency; introduced in v2 AI spec).
+  activeStates: ActiveState[];
+  goals: ActiveGoal[];
+  proficiency: Partial<Record<ProficiencyDomain, number>>;
+  recentActions: { kind: AttemptKind; tick: SimTick }[]; // rolling window (implemented later)
+  consecutiveHungerHours: number;
+  stateTriggerMemory: Record<string, SimTick>;
+
+  // Movement (Phase 1.2/4). When set, NPC is considered "in transit" and should not
+  // be counted as present in any site for witnessing/active selection.
+  travel?: TravelState;
+
+  status?: {
+    detained?: {
+      byNpcId: NpcId;
+      atSiteId: SiteId;
+      startedTick: SimTick;
+      untilTick: SimTick;
+    };
+    eclipsing?: {
+      initiatedTick: SimTick;
+      completeTick: SimTick;
+      reversibleUntilTick: SimTick;
+    };
+  };
+
   alive: boolean;
   death?: {
     tick: SimTick;
@@ -326,6 +377,10 @@ export type NpcState = {
   // Short/medium-term trauma pressure that influences recruitment susceptibility (0..100).
   trauma: number;
 
+  // Simple health meter (0..maxHp). Used for assault/heal outcomes.
+  hp: number;
+  maxHp: number;
+
   traits: Record<TraitKey, number>;
   values: ValueTag[];
   needs: Record<NeedKey, number>;
@@ -336,6 +391,8 @@ export type NpcState = {
   // scheduling / throttling
   lastAttemptTick: SimTick;
   forcedActiveUntilTick: SimTick;
+  busyUntilTick: SimTick;
+  busyKind?: AttemptKind;
 
   // knowledge + relationships
   beliefs: Belief[]; // bounded

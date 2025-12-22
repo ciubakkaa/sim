@@ -56,12 +56,15 @@ export function relationshipDeltaFromRumor(
   if (!actor || !rumor.actorId) return undefined;
 
   const conf = rumor.confidence;
-  const kind = rumor.kind as AttemptKind | "incident";
+  const kind = rumor.kind;
 
   if (kind === "steal") return { delta: { trust: -15, fear: +5 }, confidence: conf };
   if (kind === "assault") return { delta: { trust: -30, fear: +20 }, confidence: conf };
   if (kind === "kill") return { delta: { trust: -80, fear: +35, loyalty: -30 }, confidence: conf };
   if (kind === "raid" || kind === "incident") return { delta: { trust: -10, fear: +10 }, confidence: conf };
+  if (kind === "kidnap" || kind === "forced_eclipse") return { delta: { trust: -60, fear: +25, loyalty: -15 }, confidence: conf };
+  if (kind === "arrest") return { delta: { trust: +2 }, confidence: conf };
+  if (kind === "trade") return { delta: { trust: +3 }, confidence: conf };
 
   if (kind === "preach_fixed_path") {
     const certainty = npc.traits.NeedForCertainty;
@@ -70,7 +73,7 @@ export function relationshipDeltaFromRumor(
   }
 
   if (kind === "heal") return { delta: { trust: +10, loyalty: +5 }, confidence: conf };
-  if (kind === "investigate" || kind === "arrest") return { delta: { trust: +5 }, confidence: conf };
+  if (kind === "investigate") return { delta: { trust: +5 }, confidence: conf };
 
   return undefined;
 }

@@ -70,18 +70,18 @@ export function createWorld(seed: number): WorldState {
     sites: siteIds,
     edges: [
       { from: "ElvenCity", to: "ElvenTownFortified", km: 12 },
-      { from: "ElvenTownFortified", to: "DeepForest", km: 10 },
-      { from: "DeepForest", to: "AncientRuin", km: 18 },
-      { from: "DeepForest", to: "HumanVillageA", km: 9 },
+      { from: "ElvenTownFortified", to: "DeepForest", km: 10, quality: "rough" },
+      { from: "DeepForest", to: "AncientRuin", km: 18, quality: "rough" },
+      { from: "DeepForest", to: "HumanVillageA", km: 9, quality: "rough" },
       { from: "HumanVillageA", to: "HumanCityPort", km: 16 },
       { from: "HumanVillageB", to: "OpenPlains", km: 6 },
       { from: "OpenPlains", to: "HumanCityPort", km: 14 },
       { from: "OpenPlains", to: "RiverLake", km: 8 },
       { from: "RiverLake", to: "HumanVillageB", km: 10 },
       { from: "HumanCityPort", to: "CoastSea", km: 1 },
-      { from: "OpenPlains", to: "MountainPass", km: 22 },
-      { from: "MountainPass", to: "CultHideout1", km: 6 },
-      { from: "CultHideout1", to: "DeepForest", km: 14 }
+      { from: "OpenPlains", to: "MountainPass", km: 22, quality: "rough" },
+      { from: "MountainPass", to: "CultHideout1", km: 6, quality: "rough" },
+      { from: "CultHideout1", to: "DeepForest", km: 14, quality: "rough" }
     ]
   };
 
@@ -183,6 +183,15 @@ export function createWorld(seed: number): WorldState {
       name,
       category,
       siteId,
+      homeSiteId: siteId, // Home is initially the same as starting location
+      awayFromHomeSinceTick: undefined,
+      familyIds: [],
+      activeStates: [],
+      goals: [],
+      proficiency: {},
+      recentActions: [],
+      consecutiveHungerHours: 0,
+      stateTriggerMemory: {},
       alive: true,
       cult: {
         member: isConcord,
@@ -190,12 +199,15 @@ export function createWorld(seed: number): WorldState {
         joinedTick: isConcord ? 0 : undefined
       },
       trauma: 0,
+      hp: 100,
+      maxHp: 100,
       traits: defaultTraits(rng, traitBias),
       values: [],
       needs: emptyNeeds(),
       notability,
       lastAttemptTick: -999,
       forcedActiveUntilTick: 0,
+      busyUntilTick: 0,
       beliefs: [],
       relationships: {}
     };
@@ -300,6 +312,39 @@ export function createWorld(seed: number): WorldState {
   // Bandits and tainted near wilderness/hideout to seed trouble.
   for (let i = 0; i < 6; i++) addNpc("MountainPass", "BanditRaider", makeHumanName(), { Greed: 75, Integrity: 25 }, 25);
   for (let i = 0; i < 6; i++) addNpc("CultHideout1", "TaintedThrall", makeHumanName(), { Integrity: 5, Discipline: 30 }, 30);
+
+  // Assign 0–2 family members per NPC during generation (Requirement 19).
+  // Deterministic from seed; bidirectional; hard-capped at 2 familyIds per NPC.
+  {
+    const bySite: Record<SiteId, NpcId[]> = {};
+    for (const n of Object.values(npcs)) (bySite[n.siteId] ??= []).push(n.id);
+
+    for (const ids of Object.values(bySite)) ids.sort();
+
+    const MAX_FAMILY = 2;
+    for (const ids of Object.values(bySite)) {
+      if (ids.length < 2) continue;
+
+      for (const id of ids) {
+        const npc = npcs[id]!;
+        const desired = rng.int(0, MAX_FAMILY);
+        const tries = 12;
+
+        let t = 0;
+        while (npc.familyIds.length < desired && t++ < tries) {
+          const otherId = ids[rng.int(0, ids.length - 1)]!;
+          if (otherId === id) continue;
+          const other = npcs[otherId]!;
+          if (npc.familyIds.includes(otherId)) continue;
+          if (npc.familyIds.length >= MAX_FAMILY) break;
+          if (other.familyIds.length >= MAX_FAMILY) continue;
+
+          npc.familyIds.push(otherId);
+          other.familyIds.push(id);
+        }
+      }
+    }
+  }
 
   return {
     seed,

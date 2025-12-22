@@ -11,6 +11,8 @@
     "build": "tsc -p tsconfig.build.json",
     "build:test": "tsc -p tsconfig.test.json",
     "test": "npm run build:test && node --test dist-test/test/*.test.js",
+    "test:sim": "RUN_SIM_TESTS=1 npm run build:test && RUN_SIM_TESTS=1 node --test dist-test/test/*.test.js",
+    "test:slow": "RUN_SLOW_TESTS=1 npm run build:test && RUN_SLOW_TESTS=1 node --test dist-test/test/*.test.js",
     "start": "npm run build && node dist/cli.js run --days 30 --seed 1",
 
     "sim": "npm run build && node dist/cli.js run",

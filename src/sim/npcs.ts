@@ -13,6 +13,9 @@ import type {
 } from "./types";
 import { tickToDay, tickToHourOfDay } from "./types";
 import type { Rng } from "./rng";
+import { isNpcTraveling } from "./movement";
+import { isDetained } from "./eclipsing";
+import { isBusy } from "./busy";
 
 export type ActiveSelection = {
   activeNpcIds: Set<NpcId>;
@@ -61,6 +64,18 @@ function isSettlement(site: unknown): site is SettlementSiteState {
 
 export function computeNpcNeeds(npc: NpcState, world: WorldState): Record<NeedKey, number> {
   if (!npc.alive) return emptyNeeds();
+  if (isNpcTraveling(npc)) {
+    // In transit: treat like wilderness travel.
+    const needs = emptyNeeds();
+    needs.Safety = clamp(Math.round(55 + (npc.traits.Fear - 50) * 0.15), 0, 100);
+    needs.Shelter = 70;
+    needs.Food = clamp(Math.round(25 + (npc.traits.Discipline < 40 ? 10 : 0)), 0, 100);
+    needs.Health = clamp(Math.round(10 + npc.trauma * 0.2), 0, 100);
+    needs.Duty = clamp(dutyBaseline(npc.category), 0, 100);
+    needs.Meaning = clamp(Math.round(npc.trauma * 0.4), 0, 100);
+    return needs;
+  }
+
   const site = world.sites[npc.siteId];
   const needs = emptyNeeds();
 
@@ -73,7 +88,8 @@ export function computeNpcNeeds(npc: NpcState, world: WorldState): Record<NeedKe
     const foodPerCapitaStored = pop > 0 ? foodTotal / pop : 0;
 
     needs.Food = clamp(Math.round((2 - foodPerCapitaStored) * 35), 0, 100);
-    needs.Health = clamp(Math.round(site.sickness), 0, 100);
+    const personalHealthStress = npc.maxHp > 0 ? clamp(Math.round(((npc.maxHp - npc.hp) / npc.maxHp) * 100), 0, 100) : 0;
+    needs.Health = clamp(Math.max(site.sickness, personalHealthStress), 0, 100);
     needs.Safety = clamp(Math.round(site.unrest * 0.7 + site.eclipsingPressure * 0.35), 0, 100);
     needs.Shelter = clamp(Math.round(Math.max(0, pop - site.housingCapacity) * 4), 0, 100);
 
@@ -135,6 +151,9 @@ export function selectActiveNpcs(world: WorldState, rng: Rng): ActiveSelection {
   const bySite: Record<SiteId, NpcState[]> = {};
   for (const n of Object.values(world.npcs)) {
     if (!n.alive) continue;
+    if (isNpcTraveling(n)) continue;
+    if (isDetained(n)) continue;
+    if (isBusy(n, world.tick)) continue;
     (bySite[n.siteId] ??= []).push(n);
   }
 
