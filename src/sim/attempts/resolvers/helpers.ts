@@ -26,6 +26,19 @@ export function makeHelpers(world: WorldState, attempt: Attempt, ctx: ResolveCtx
       // Snapshot consequences at emit time so later mutations don't retroactively change past events.
       data: { attempt, consequences: [...consequences], ...(data ?? {}) }
     });
+
+    const locationId = (attempt.resources as any)?.locationId;
+    if (typeof locationId === "string" && attempt.kind !== "idle" && attempt.kind !== "travel") {
+      events.push({
+        id: makeId("evt", nextWorld.tick, ctx.nextEventSeq()),
+        tick: nextWorld.tick,
+        kind: "local.action.performed",
+        visibility: "system",
+        siteId: attempt.siteId,
+        message: `Local action: ${attempt.kind}`,
+        data: { npcId: attempt.actorId, kind: attempt.kind, locationId }
+      });
+    }
   };
 
   const addPublicRumor = (label: string, confidence: number) => {

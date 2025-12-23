@@ -5,6 +5,7 @@ import type { Rng } from "../rng";
 import { isNpcTraveling } from "../movement";
 import { isDetained } from "../eclipsing";
 import { isBusy } from "../busy";
+import { isNpcLocalTraveling } from "../localMovement";
 import { ACTION_DEFINITIONS } from "../actions/definitions";
 import { IDLE_ACTION_DEFINITIONS, pickIdleFallback } from "../actions/idle";
 import { scoreActions, selectAction } from "../actions/scoring";
@@ -15,6 +16,7 @@ import { getRelationship } from "../relationships";
 
 export function shouldNpcAct(npc: NpcState, worldTick: number): boolean {
   if (isNpcTraveling(npc)) return false;
+  if (isNpcLocalTraveling(npc)) return false;
   if (isDetained(npc)) return false;
   if (isBusy(npc, worldTick)) return false;
   return worldTick - npc.lastAttemptTick >= 2;

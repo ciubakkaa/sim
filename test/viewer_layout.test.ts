@@ -14,7 +14,8 @@ test("computeDeterministicLayout differs across seeds (sanity)", () => {
   const w = createWorld(1);
   const a = computeDeterministicLayout(w.map, 1);
   const b = computeDeterministicLayout(w.map, 2);
-  assert.notEqual(JSON.stringify(a.sites), JSON.stringify(b.sites));
+  // World layout is now a fixed hand-tuned preset (map-like), independent of seed.
+  assert.equal(JSON.stringify(a.sites), JSON.stringify(b.sites));
 });
 
 

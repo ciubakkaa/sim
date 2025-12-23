@@ -1,1 +1,1 @@
-{"root":["./src/main.tsx","./src/lib/protocol.ts","./src/ui/app.tsx","./src/ui/components/eventfeed.tsx","./src/ui/components/mapcanvas.tsx","./src/ui/components/npcpanel.tsx"],"version":"5.9.3"}
+{"root":["./src/main.tsx","./src/lib/protocol.ts","./src/ui/app.tsx","./src/ui/components/buildingpanel.tsx","./src/ui/components/eventfeed.tsx","./src/ui/components/mapcanvas.tsx","./src/ui/components/npcpanel.tsx"],"version":"5.9.3"}

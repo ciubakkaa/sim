@@ -34,7 +34,20 @@ export type NpcState = {
   category: string;
   siteId: string;
   homeSiteId: string;
+  familyIds?: string[];
   alive: boolean;
+  homeLocationId?: string;
+  local?: { siteId: string; locationId: string };
+  localTravel?: {
+    siteId: string;
+    fromLocationId: string;
+    toLocationId: string;
+    totalMeters: number;
+    remainingMeters: number;
+    startedTick: number;
+    lastProgressTick: number;
+    purposeKind?: string;
+  };
   cult?: { member: boolean; role: string; joinedTick?: number };
   hp: number;
   maxHp: number;
@@ -55,11 +68,18 @@ export type NpcState = {
 
 export type SiteState = { id: string; kind: string; name: string; culture: string } & Record<string, unknown>;
 
+export type LocalPos = { x: number; y: number };
+export type LocalNode = { id: string; kind: string; name: string; pos: LocalPos; capacity?: number; meta?: Record<string, unknown> };
+export type LocalEdge = { from: string; to: string; meters: number };
+export type BuildingState = { id: string; inventory: { food?: Record<string, number>; items?: Record<string, number>; books?: number } };
+export type SettlementLocal = { nodes: LocalNode[]; edges: LocalEdge[]; buildings: Record<string, BuildingState> };
+export type SettlementSiteState = SiteState & { kind: "settlement"; local?: SettlementLocal };
+
 export type WorldState = {
   seed: number;
   tick: number;
   map: WorldMap;
-  sites: Record<string, SiteState>;
+  sites: Record<string, SiteState | SettlementSiteState>;
   npcs: Record<string, NpcState>;
 };
 

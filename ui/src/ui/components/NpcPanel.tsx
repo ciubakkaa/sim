@@ -119,7 +119,9 @@ export function NpcPanel(props: Props) {
 
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", color: "var(--muted)", fontSize: 12 }}>
               <span>site={selected.siteId}</span>
+              {selected.local?.locationId ? <span>loc={selected.local.locationId.split(":").slice(-1)[0]}</span> : null}
               <span>home={selected.homeSiteId}</span>
+              {selected.homeLocationId ? <span>homeLoc={selected.homeLocationId.split(":").slice(-1)[0]}</span> : null}
               <span>
                 hp={Math.round(selected.hp)}/{selected.maxHp}
               </span>

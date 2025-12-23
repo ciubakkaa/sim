@@ -49,7 +49,7 @@ export function startTravel(
     startedTick: world.tick,
     lastProgressTick: world.tick
   };
-  return { npc: { ...npc, travel } };
+  return { npc: { ...npc, travel, local: undefined, localTravel: undefined } };
 }
 
 type TravelEncounterKind = "mishap" | "meeting" | "bandits" | "omen";
@@ -212,13 +212,28 @@ export function progressTravelHourly(
     const updatedBase: NpcState = {
       ...npc,
       siteId: tr.to,
-      travel: undefined
+      travel: undefined,
+      local: undefined,
+      localTravel: undefined
     };
 
     let updated = updatedBase;
     const dest = nextWorld.sites[tr.to];
     if (isSettlement(dest)) {
-      updated = ingestRumorsOnArrival(updatedBase, dest, nextWorld);
+      // Phase X: initialize a local location when arriving in a settlement.
+      // - if returning home, put them at their homeLocationId (if it exists and belongs to this site)
+      // - otherwise place at gate/streets
+      const localIdCandidates = [
+        updated.homeSiteId === dest.id && updated.homeLocationId ? updated.homeLocationId : undefined,
+        `${dest.id}:gate`,
+        `${dest.id}:streets`
+      ].filter(Boolean) as string[];
+      const localNodes = dest.local?.nodes ?? [];
+      const exists = (id: string) => localNodes.some((n) => n.id === id);
+      const chosen = localIdCandidates.find((id) => exists(id)) ?? (localNodes[0]?.id);
+      if (chosen) updated = { ...updated, local: { siteId: dest.id, locationId: chosen } };
+
+      updated = ingestRumorsOnArrival(updated, dest, nextWorld);
       // Spread a tiny amount of gossip cross-site (bounded, no immediate relationship cascade).
       const withGossip = shareBeliefsOnArrival(updated, dest, nextWorld);
       if (withGossip !== dest) {

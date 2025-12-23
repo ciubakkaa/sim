@@ -30,6 +30,57 @@ export type FoodStock = Record<FoodType, FoodLot[]>;
 
 export type Culture = "human" | "elven" | "neutral";
 
+export type LocationId = string;
+
+export type LocationKind =
+  | "house"
+  | "tavern"
+  | "market"
+  | "shrine"
+  | "guardhouse"
+  | "docks"
+  | "fields"
+  | "library"
+  | "clinic"
+  | "well"
+  | "storage"
+  | "gate"
+  | "streets";
+
+export type LocalPos = { x: number; y: number };
+
+export type LocalNode = {
+  id: LocationId;
+  kind: LocationKind;
+  name: string;
+  pos: LocalPos;
+  capacity?: number;
+  meta?: Record<string, unknown>;
+};
+
+export type LocalEdge = {
+  from: LocationId;
+  to: LocationId;
+  meters: number;
+};
+
+export type BuildingInventory = {
+  food?: Partial<Record<FoodType, number>>;
+  items?: Record<string, number>;
+  books?: number;
+};
+
+export type BuildingState = {
+  id: LocationId;
+  inventory: BuildingInventory;
+};
+
+export type SettlementLocal = {
+  nodes: LocalNode[];
+  edges: LocalEdge[];
+  buildings: Record<LocationId, BuildingState>;
+};
+
 export type Cohorts = {
   children: number;
   adults: number;
@@ -82,6 +133,9 @@ export type SettlementSiteState = BaseSiteState & {
 
   // Death counters for the last completed day (cohort-level, not named NPCs).
   deathsToday: Partial<Record<DeathCause, number>>;
+
+  // Phase X: intra-settlement layout + building state (viewer + sim-affecting movement).
+  local?: SettlementLocal;
 };
 
 export type TerrainSiteState = BaseSiteState & {
@@ -137,6 +191,18 @@ export type TravelState = {
   lastProgressTick: SimTick;
 };
 
+export type LocalTravelState = {
+  kind: "localTravel";
+  siteId: SiteId;
+  fromLocationId: LocationId;
+  toLocationId: LocationId;
+  totalMeters: number;
+  remainingMeters: number;
+  startedTick: SimTick;
+  lastProgressTick: SimTick;
+  purposeKind?: AttemptKind;
+};
+
 export type AttemptKind =
   | "idle"
   | "travel"
@@ -179,6 +245,9 @@ export type EventKind =
   | "sim.day.ended"
   | "npc.died"
   | "travel.encounter"
+  | "local.travel.started"
+  | "local.travel.arrived"
+  | "local.action.performed"
   | "world.food.produced"
   | "world.food.consumed"
   | "world.food.spoiled"
@@ -350,6 +419,14 @@ export type NpcState = {
   // Movement (Phase 1.2/4). When set, NPC is considered "in transit" and should not
   // be counted as present in any site for witnessing/active selection.
   travel?: TravelState;
+
+  // Intra-settlement location (Phase X). Only meaningful when at a settlement site.
+  homeLocationId?: LocationId;
+  local?: {
+    siteId: SiteId;
+    locationId: LocationId;
+  };
+  localTravel?: LocalTravelState;
 
   status?: {
     detained?: {

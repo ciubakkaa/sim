@@ -6,6 +6,7 @@ import { makeId } from "./ids";
 import { computeNpcNeeds, selectActiveNpcs } from "./npcs";
 import { generateScoredAttempt, resolveAndApplyAttempt } from "./attempts";
 import { progressTravelHourly, isNpcTraveling } from "./movement";
+import { progressLocalTravelHourly } from "./localMovement";
 import { progressDetentionHourly, progressEclipsingHourly } from "./eclipsing";
 import { decayBeliefsDaily } from "./beliefs";
 import { applyNotabilityFromEvents, decayNotabilityDaily } from "./notability";
@@ -49,7 +50,12 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
   events.push(...moved.events);
   keyChanges.push(...moved.keyChanges);
 
-  const detention = progressDetentionHourly(moved.world, { rng, nextEventSeq });
+  // Intra-settlement movement progresses with time (Phase X).
+  const movedLocal = progressLocalTravelHourly(moved.world, { rng, nextEventSeq });
+  events.push(...movedLocal.events);
+  keyChanges.push(...movedLocal.keyChanges);
+
+  const detention = progressDetentionHourly(movedLocal.world, { rng, nextEventSeq });
   events.push(...detention.events);
   keyChanges.push(...detention.keyChanges);
 

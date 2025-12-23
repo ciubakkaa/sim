@@ -1,6 +1,7 @@
 import { Rng } from "./rng";
 import { defaultTraits, emptyNeeds } from "./npcs";
-import type { FoodStock, NpcCategory, NpcId, NpcState, SiteId, SiteState, WorldMap, WorldState } from "./types";
+import type { FoodStock, NpcCategory, NpcId, NpcState, SettlementSiteState, SiteId, SiteState, WorldMap, WorldState } from "./types";
+import { generateSettlementInterior } from "./settlements/generateInterior";
 
 function emptyFood(): FoodStock {
   return { grain: [], fish: [], meat: [] };
@@ -41,6 +42,10 @@ function special(id: SiteId, name: string): SiteState {
 
 function hideout(id: SiteId, name: string): SiteState {
   return { id, kind: "hideout", name, culture: "neutral", eclipsingPressure: 0, anchoringStrength: 0, hidden: true };
+}
+
+function isSettlementSite(s: SiteState): s is SettlementSiteState {
+  return s.kind === "settlement";
 }
 
 /**
@@ -347,6 +352,28 @@ export function createWorld(seed: number): WorldState {
     }
   }
 
+  // Phase X: procedurally generate settlement interiors and assign NPC homes (deterministic).
+  {
+    const bySite: Record<SiteId, NpcState[]> = {};
+    for (const n of Object.values(npcs)) (bySite[n.siteId] ??= []).push(n);
+    for (const ids of Object.values(bySite)) ids.sort((a, b) => a.id.localeCompare(b.id));
+
+    for (const s of Object.values(sites)) {
+      if (!isSettlementSite(s)) continue;
+      const localRng = new Rng((seed ^ fnvSite(s.id)) >>> 0);
+      const npcsHere = bySite[s.id] ?? [];
+      const built = generateSettlementInterior(localRng, s, npcsHere);
+      s.local = built.local;
+
+      for (const n of npcsHere) {
+        const homeLoc = built.npcHomeById[n.id] ?? `${s.id}:street:i0`;
+        n.homeLocationId = homeLoc;
+        n.local = { siteId: s.id, locationId: homeLoc };
+        n.localTravel = undefined;
+      }
+    }
+  }
+
   return {
     seed,
     tick: 0,
@@ -354,6 +381,15 @@ export function createWorld(seed: number): WorldState {
     sites,
     npcs
   };
+}
+
+function fnvSite(siteId: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < siteId.length; i++) {
+    h ^= siteId.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
 }
 
 

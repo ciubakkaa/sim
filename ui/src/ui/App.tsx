@@ -3,6 +3,7 @@ import type { ControlAction, MapLayout, SimEvent, ViewerServerMessage, ViewerSet
 import { EventFeed } from "./components/EventFeed";
 import { MapCanvas } from "./components/MapCanvas";
 import { NpcPanel } from "./components/NpcPanel";
+import { BuildingPanel } from "./components/BuildingPanel";
 import "./theme.css";
 
 type ConnectionState = "disconnected" | "connecting" | "connected";
@@ -29,6 +30,9 @@ export function App() {
   const [events, setEvents] = useState<SimEvent[]>([]);
   const [selectedNpcId, setSelectedNpcId] = useState<string | null>(null);
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
+  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
+  const [focusNpcId, setFocusNpcId] = useState<string | null>(null);
+  const [showEvents, setShowEvents] = useState(false);
 
   const esRef = useRef<EventSource | null>(null);
 
@@ -101,6 +105,8 @@ export function App() {
   }, [settings, world]);
 
   const canControl = conn === "connected" && Boolean(settings);
+  const selectedSite = selectedSiteId && world ? (world.sites as any)[selectedSiteId] : null;
+  const isSettlementSelected = Boolean(selectedSite && (selectedSite as any).kind === "settlement" && (selectedSite as any).local);
 
   return (
     <div style={{ height: "100vh", display: "grid", gridTemplateRows: "56px 1fr", gap: 12, padding: 12 }}>
@@ -136,6 +142,17 @@ export function App() {
         </label>
 
         <div style={{ display: "flex", gap: 8 }}>
+          {isSettlementSelected ? (
+            <button
+              onClick={() => {
+                setSelectedSiteId(null);
+                setSelectedLocationId(null);
+              }}
+              style={btnStyle}
+            >
+              World
+            </button>
+          ) : null}
           <button
             disabled={!canControl}
             onClick={() => postControl(serviceUrl, { action: settings?.paused ? "play" : "pause" })}
@@ -148,6 +165,9 @@ export function App() {
           </button>
           <button disabled={!canControl} onClick={() => postControl(serviceUrl, { action: "reset" })} style={btnStyle}>
             Reset
+          </button>
+          <button onClick={() => setShowEvents((v) => !v)} style={btnStyle}>
+            {showEvents ? "Hide Events" : "Events"}
           </button>
         </div>
 
@@ -171,25 +191,49 @@ export function App() {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 12, minHeight: 0 }}>
-        <div style={{ display: "grid", gridTemplateRows: "1fr 240px", gap: 12, minHeight: 0 }}>
+        <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 12, minHeight: 0 }}>
           <div style={panelStyle}>
             <MapCanvas
               layout={layout}
               world={world}
               selectedNpcId={selectedNpcId}
               selectedSiteId={selectedSiteId}
+              selectedLocationId={selectedLocationId}
+              focusNpcId={focusNpcId}
               onSelectNpcId={setSelectedNpcId}
-              onSelectSiteId={setSelectedSiteId}
+              onSelectSiteId={(id) => {
+                setSelectedSiteId(id);
+                if (id !== selectedSiteId) setSelectedLocationId(null);
+              }}
+              onSelectLocationId={setSelectedLocationId}
             />
           </div>
 
-          <div style={panelStyle}>
-            <EventFeed events={events} selectedNpcId={selectedNpcId} selectedSiteId={selectedSiteId} />
-          </div>
+          {showEvents ? (
+            <div style={{ ...panelStyle, height: 240 }}>
+              <EventFeed events={events} selectedNpcId={selectedNpcId} selectedSiteId={selectedSiteId} />
+            </div>
+          ) : null}
         </div>
 
-        <div style={panelStyle}>
-          <NpcPanel world={world} selectedNpcId={selectedNpcId} onSelectNpcId={setSelectedNpcId} />
+        <div style={{ display: "grid", gridTemplateRows: "1fr 280px", gap: 12, minHeight: 0 }}>
+          <div style={panelStyle}>
+            <NpcPanel world={world} selectedNpcId={selectedNpcId} onSelectNpcId={setSelectedNpcId} />
+          </div>
+          <div style={panelStyle}>
+            <BuildingPanel
+              world={world}
+              siteId={selectedSiteId}
+              locationId={selectedLocationId}
+              onSelectLocationId={setSelectedLocationId}
+              onJumpToNpc={(npcId) => {
+                setSelectedNpcId(npcId);
+                setFocusNpcId(npcId);
+                // clear focus after a short delay so repeated clicks work
+                window.setTimeout(() => setFocusNpcId(null), 200);
+              }}
+            />
+          </div>
         </div>
       </div>
     </div>

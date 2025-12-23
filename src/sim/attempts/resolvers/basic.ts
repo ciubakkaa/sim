@@ -10,6 +10,7 @@ import { isSettlement } from "../rumors";
 import { markBusy } from "../../busy";
 import { addFoodLot } from "../../food";
 import { addBelief } from "../../beliefs";
+import { addFoodToBuilding, pickLocationByKinds } from "../../localRules";
 
 export function resolveTravel(world: WorldState, attempt: Attempt, ctx: ResolveCtx): ResolveResult {
   const h = makeHelpers(world, attempt, ctx);
@@ -62,6 +63,9 @@ export function resolveWork(world: WorldState, attempt: Attempt, ctx: ResolveCtx
 
   if (amount > 0) {
     const updatedSite = addFoodLot(site, type, amount, Math.floor(h.world.tick / 24));
+    // Phase X: mirror some produced food into a local storehouse for UI inspection.
+    const storageId = pickLocationByKinds(site, ["storage"]);
+    const nextLocal = storageId ? addFoodToBuilding({ ...site, local: site.local }, storageId, type, amount) : site.local;
     h.apply({
       kind: "site.patch",
       siteId: site.id,
@@ -70,7 +74,8 @@ export function resolveWork(world: WorldState, attempt: Attempt, ctx: ResolveCtx
         laborWorkedToday: {
           ...(site.laborWorkedToday ?? { grain: 0, fish: 0, meat: 0 }),
           [type]: (site.laborWorkedToday?.[type] ?? 0) + hours
-        }
+        },
+        local: nextLocal
       } as Partial<SettlementSiteState>
     });
   } else {
@@ -82,7 +87,8 @@ export function resolveWork(world: WorldState, attempt: Attempt, ctx: ResolveCtx
         laborWorkedToday: {
           ...(site.laborWorkedToday ?? { grain: 0, fish: 0, meat: 0 }),
           [type]: (site.laborWorkedToday?.[type] ?? 0) + hours
-        }
+        },
+        local: site.local
       } as Partial<SettlementSiteState>
     });
   }

@@ -2,6 +2,7 @@ import type { NpcState, WorldState } from "../types";
 import { isBusy } from "../busy";
 import { isDetained } from "../eclipsing";
 import { isNpcTraveling } from "../movement";
+import { isNpcLocalTraveling } from "../localMovement";
 import type { ActionPrecondition } from "./types";
 import { listTargets } from "./targets";
 
@@ -65,7 +66,7 @@ export function checkPreconditions(preconditions: ActionPrecondition[], npc: Npc
     }
 
     if (p.type === "notTraveling") {
-      if (isNpcTraveling(npc)) return false;
+      if (isNpcTraveling(npc) || isNpcLocalTraveling(npc)) return false;
       continue;
     }
 

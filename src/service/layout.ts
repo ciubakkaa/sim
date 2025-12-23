@@ -44,6 +44,51 @@ function desiredEdgeLength(edge: MapEdge): number {
   return 80 + km * 6;
 }
 
+function presetPositionsForCurrentWorld(siteIds: SiteId[]): Record<SiteId, Vec2> | undefined {
+  const wanted: SiteId[] = [
+    "ElvenCity",
+    "ElvenTownFortified",
+    "HumanCityPort",
+    "HumanVillageA",
+    "HumanVillageB",
+    "AncientRuin",
+    "CultHideout1",
+    "DeepForest",
+    "RiverLake",
+    "OpenPlains",
+    "MountainPass",
+    "CoastSea"
+  ];
+  const set = new Set(siteIds);
+  if (!wanted.every((x) => set.has(x))) return undefined;
+
+  // Hand-tuned rough map. Deterministic and stable across seeds.
+  return {
+    ElvenCity: { x: -520, y: -260 },
+    ElvenTownFortified: { x: -420, y: -150 },
+    DeepForest: { x: -230, y: -120 },
+    AncientRuin: { x: -80, y: -220 },
+    HumanVillageA: { x: 40, y: -60 },
+    HumanCityPort: { x: 240, y: 40 },
+    CoastSea: { x: 360, y: 70 },
+    OpenPlains: { x: 120, y: 170 },
+    RiverLake: { x: -40, y: 250 },
+    HumanVillageB: { x: 20, y: 270 },
+    MountainPass: { x: 280, y: 260 },
+    CultHideout1: { x: 140, y: 360 }
+  };
+}
+
+function edgeBendPoint(a: Vec2, b: Vec2, key: string): Vec2 {
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  const d = sub(b, a);
+  const dist = Math.max(1, len(d));
+  const n = norm({ x: -d.y, y: d.x });
+  const sign = (fnv1a32(key) % 2) === 0 ? 1 : -1;
+  const mag = clamp(dist * 0.18, 18, 65) * sign;
+  return add(mid, mul(n, mag));
+}
+
 export function computeDeterministicLayout(map: WorldMap, seed: number): MapLayout {
   const siteIds = [...map.sites].sort();
   const edges = [...map.edges].sort((a, b) => {
@@ -51,6 +96,33 @@ export function computeDeterministicLayout(map: WorldMap, seed: number): MapLayo
     const bk = `${b.from}->${b.to}`;
     return ak.localeCompare(bk);
   });
+
+  const preset = presetPositionsForCurrentWorld(siteIds);
+  if (preset) {
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
+    for (const id of siteIds) {
+      const p = preset[id];
+      if (!p) continue;
+      minX = Math.min(minX, p.x);
+      minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x);
+      maxY = Math.max(maxY, p.y);
+    }
+
+    return {
+      sites: preset,
+      edges: edges.map((e) => {
+        const a = preset[e.from]!;
+        const b = preset[e.to]!;
+        const bend = edgeBendPoint(a, b, `${e.from}<->${e.to}`);
+        return { from: e.from, to: e.to, points: [a, bend, b] };
+      }),
+      bounds: { minX, minY, maxX, maxY }
+    };
+  }
 
   // Deterministic initial placement: a slightly rotated circle
   const n = Math.max(1, siteIds.length);
@@ -145,7 +217,7 @@ export function computeDeterministicLayout(map: WorldMap, seed: number): MapLayo
     edges: edges.map((e) => ({
       from: e.from,
       to: e.to,
-      points: [sites[e.from]!, sites[e.to]!]
+      points: [sites[e.from]!, edgeBendPoint(sites[e.from]!, sites[e.to]!, `${e.from}<->${e.to}`), sites[e.to]!]
     })),
     bounds: { minX, minY, maxX, maxY }
   };
