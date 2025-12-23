@@ -13,6 +13,9 @@ import { applyNotabilityFromEvents, decayNotabilityDaily } from "./notability";
 import { updateStates } from "./states/engine";
 import { clamp } from "./util";
 import { applyBeliefsFromEvents } from "./beliefs/creation";
+import { updateGoals } from "./goals/engine";
+import { updateIntents } from "./intents/engine";
+import { processPendingAttempts, scheduleAttemptIfNeeded } from "./attempts/lifecycle";
 
 export type TickOptions = {
   attempts?: Attempt[];
@@ -137,6 +140,25 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
     withNeeds = { ...withNeeds, npcs: nextNpcs };
   }
 
+  // Goals v1: update/maintain parallel goals before attempt generation.
+  withNeeds = updateGoals(withNeeds, { rng });
+
+  // Intents: short-lived internal impulses/plans (can also emit public signals/rumor incidents).
+  {
+    const intentsRes = updateIntents(withNeeds, { nextEventSeq });
+    withNeeds = intentsRes.world;
+    events.push(...intentsRes.events);
+    keyChanges.push(...intentsRes.keyChanges);
+  }
+
+  // Execute any due pending attempts before generating new ones.
+  {
+    const pendingRes = processPendingAttempts(withNeeds, { rng, nextEventSeq });
+    withNeeds = pendingRes.world;
+    events.push(...pendingRes.events);
+    keyChanges.push(...pendingRes.keyChanges);
+  }
+
   // Include externally supplied attempts (e.g. future player/adapter), plus AI attempts.
   const aiAttempts: Attempt[] = [];
   {
@@ -154,10 +176,28 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
   // Resolve supplied attempts first (stable), then AI attempts.
   const allAttempts = [...(opts.attempts ?? []), ...aiAttempts];
   for (const a of allAttempts) {
+    const scheduled = scheduleAttemptIfNeeded(afterAttempts, a, { rng, nextEventSeq });
+    if (scheduled.scheduled) {
+      afterAttempts = scheduled.world;
+      events.push(...scheduled.events);
+      keyChanges.push(...scheduled.keyChanges);
+      continue;
+    }
+
     const res = resolveAndApplyAttempt(afterAttempts, a, { rng, nextEventSeq });
     afterAttempts = res.world;
     events.push(...res.events);
     keyChanges.push(...res.keyChanges);
+    // Completion marker for immediate attempts.
+    events.push({
+      id: makeId("evt", afterAttempts.tick, nextEventSeq()),
+      tick: afterAttempts.tick,
+      kind: "attempt.completed",
+      visibility: a.visibility,
+      siteId: a.siteId,
+      message: `Attempt completed: ${a.kind}`,
+      data: { attempt: a }
+    });
   }
 
   // Task 13: create beliefs from observed events/attempts before reactive state updates.

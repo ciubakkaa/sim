@@ -2,6 +2,8 @@ import { runSimulation } from "./runner/run";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
+import { createWorld } from "./sim/worldSeed";
+import { ensurePersistedRunDir, writeRunMeta, writeRunSnapshot } from "./service/persist";
 
 function parseArgs(argv: string[]) {
   const args = argv.slice(2);
@@ -54,6 +56,15 @@ function defaultEventsOutPath(opts: { seed: number; days: number }): string {
   return path.join("logs", `events-${ts}-seed${opts.seed}-days${opts.days}.jsonl`);
 }
 
+function defaultViewerEventsOutPath(opts: { seed: number }): string {
+  const ts = timestampForFilename();
+  return path.join("logs", `events-${ts}-seed${opts.seed}-viewer.jsonl`);
+}
+
+function defaultWorldsBaseDir(): string {
+  return path.join("logs", "worlds");
+}
+
 function writeEventsJsonl(outPath: string, events: unknown[]): Promise<void> {
   const dir = path.dirname(outPath);
   fs.mkdirSync(dir, { recursive: true });
@@ -80,11 +91,11 @@ function printHelp() {
       "",
       "Commands:",
       "  run --days <n> --seed <n> [--events] [--events-limit <n>] [--events-kind <kind>] [--events-site <siteId>]",
-      "      [--save-events] [--events-out <path>]",
+      "      [--save-events] [--events-out <path>] [--persist-run] [--worlds-dir <path>] [--run-id <id>]",
       "  npcs --days <n> --seed <n> --site <siteId> [--limit <n>]",
       "  npc --days <n> --seed <n> --id <npcId>",
       "      (npc/npcs now display travel/detention/eclipsing/busy/hp/beliefs)",
-      "  viewer --seed <n> [--port <n>] [--ms-per-tick <n>] [--play]",
+      "  viewer --seed <n> [--port <n>] [--ms-per-tick <n>] [--play] [--save-events] [--events-out <path>] [--persist-run] [--worlds-dir <path>] [--run-id <id>]",
       "      (starts an SSE sim-service on /events and control on POST /control)",
       "  summarize-log --file <path> [--sample-days <csv>] [--show-sites <csv>]",
       "  npc-history --id <npcId> [--file <path>] [--limit <n>]  (defaults to latest logs/events-*.jsonl)",
@@ -93,6 +104,7 @@ function printHelp() {
       "Notes:",
       "  - You can pass different params via npm scripts using: npm run <script> -- --days 90 --seed 2",
       "  - --save-events writes JSONL to ./logs/ by default (timestamped filename).",
+      "  - --persist-run writes snapshot+events to ./logs/worlds/seed-<seed>/runs/<runId>/",
       "",
       "Examples:",
       "  node dist/cli.js run --days 30 --seed 1",
@@ -100,7 +112,10 @@ function printHelp() {
       "  node dist/cli.js run --days 10 --seed 42 --events --events-kind attempt.recorded",
       "  node dist/cli.js run --days 10 --seed 42 --save-events",
       "  node dist/cli.js run --days 10 --seed 42 --events-kind attempt.recorded --save-events",
+      "  node dist/cli.js run --days 30 --seed 1 --persist-run",
       "  node dist/cli.js viewer --seed 1 --port 8787 --ms-per-tick 60000 --play",
+      "  node dist/cli.js viewer --seed 1 --port 8787 --ms-per-tick 60000 --play --save-events",
+      "  node dist/cli.js viewer --seed 1 --port 8787 --ms-per-tick 60000 --play --persist-run",
       "  node dist/cli.js npcs --days 0 --seed 1 --site HumanCityPort --limit 20",
       "  node dist/cli.js npc --days 3 --seed 1 --id npc:25",
       "  node dist/cli.js summarize-log --file logs/events-20251214-223440Z-seed1-days180.jsonl",
@@ -421,13 +436,62 @@ async function main() {
   if (cmd === "viewer") {
     const { SimRuntime } = await import("./service/runtime");
     const { startViewerServer } = await import("./service/server");
+    const { openEventLog } = await import("./service/eventLog");
 
     const seed = numFlag(flags, "seed", 1);
     const port = numFlag(flags, "port", 8787);
     const msPerTick = numFlag(flags, "ms-per-tick", 60_000);
     const play = Boolean(flags.play);
+    const saveEvents = Boolean(flags["save-events"]);
+    const eventsOut = strFlag(flags, "events-out") ?? (saveEvents ? defaultViewerEventsOutPath({ seed }) : undefined);
 
     const runtime = new SimRuntime({ seed, msPerTick, paused: !play });
+    const persistRun = Boolean(flags["persist-run"]);
+    const worldsDir = strFlag(flags, "worlds-dir") ?? defaultWorldsBaseDir();
+    const runId = strFlag(flags, "run-id");
+
+    const persisted = persistRun ? ensurePersistedRunDir({ seed, baseDir: worldsDir, runId }) : null;
+    if (persisted) {
+      const nowIso = new Date().toISOString();
+      writeRunMeta(persisted, { version: 1, seed, runId: persisted.runId, startedAt: nowIso, argv: process.argv });
+      const st = runtime.state;
+      writeRunSnapshot(persisted, {
+        version: 1,
+        seed,
+        createdAt: nowIso,
+        world: st.world,
+        settings: st.settings,
+        map: st.world.map,
+        layout: st.layout
+      });
+    }
+
+    const logs = [
+      ...(persisted ? [openEventLog(persisted.eventsPath)] : []),
+      ...(eventsOut ? [openEventLog(eventsOut)] : [])
+    ];
+
+    if (logs.length) {
+      runtime.on((msg: any) => {
+        if (msg?.type === "tick" && Array.isArray(msg.events) && msg.events.length) {
+          for (const l of logs) l.appendEvents(msg.events);
+        }
+      });
+
+      const close = () => {
+        for (const l of logs) l.close();
+      };
+      process.on("exit", close);
+      process.on("SIGINT", () => {
+        close();
+        process.exit(0);
+      });
+      process.on("SIGTERM", () => {
+        close();
+        process.exit(0);
+      });
+    }
+
     startViewerServer({ port, runtime });
 
     console.log(`Viewer sim-service running on http://localhost:${port}`);
@@ -435,6 +499,8 @@ async function main() {
     console.log(`- Controls:   POST /control (JSON)`);
     console.log("");
     console.log(`seed=${seed} msPerTick=${msPerTick} paused=${!play}`);
+    if (persisted) console.log(`persistRun=${persisted.runDir}`);
+    for (const l of logs) console.log(`eventLog=${l.path}`);
 
     return;
   }
@@ -568,6 +634,9 @@ async function main() {
   const eventsSite = strFlag(flags, "events-site");
   const saveEvents = Boolean(flags["save-events"]);
   const eventsOut = strFlag(flags, "events-out");
+  const persistRun = Boolean(flags["persist-run"]);
+  const worldsDir = strFlag(flags, "worlds-dir") ?? defaultWorldsBaseDir();
+  const runId = strFlag(flags, "run-id");
 
   console.log(`Seed=${seed} Days=${days}`);
   console.log(`Final tick=${res.finalWorld.tick} (hour ticks)`);
@@ -606,6 +675,16 @@ async function main() {
     const outPath = eventsOut ?? defaultEventsOutPath({ seed, days });
     await writeEventsJsonl(outPath, filtered);
     console.log(`\nSaved ${filtered.length} events to ${outPath}`);
+  }
+
+  if (persistRun) {
+    const p = ensurePersistedRunDir({ seed, baseDir: worldsDir, runId });
+    const nowIso = new Date().toISOString();
+    writeRunMeta(p, { version: 1, seed, runId: p.runId, startedAt: nowIso, argv: process.argv });
+    const w0 = createWorld(seed);
+    writeRunSnapshot(p, { version: 1, seed, createdAt: nowIso, world: w0, map: w0.map });
+    await writeEventsJsonl(p.eventsPath, res.events);
+    console.log(`\nPersisted run to ${p.runDir}`);
   }
 }
 

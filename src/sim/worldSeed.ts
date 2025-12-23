@@ -2,6 +2,7 @@ import { Rng } from "./rng";
 import { defaultTraits, emptyNeeds } from "./npcs";
 import type { FoodStock, NpcCategory, NpcId, NpcState, SettlementSiteState, SiteId, SiteState, WorldMap, WorldState } from "./types";
 import { generateSettlementInterior } from "./settlements/generateInterior";
+import { clamp } from "./util";
 
 function emptyFood(): FoodStock {
   return { grain: [], fish: [], meat: [] };
@@ -194,6 +195,7 @@ export function createWorld(seed: number): WorldState {
       familyIds: [],
       activeStates: [],
       goals: [],
+      intents: [],
       proficiency: {},
       recentActions: [],
       consecutiveHungerHours: 0,
@@ -214,6 +216,7 @@ export function createWorld(seed: number): WorldState {
       lastAttemptTick: -999,
       forcedActiveUntilTick: 0,
       busyUntilTick: 0,
+      pendingAttempt: undefined,
       beliefs: [],
       relationships: {}
     };

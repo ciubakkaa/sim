@@ -13,6 +13,8 @@ import { STATE_DEFINITIONS } from "../states/definitions";
 import { resolveStateConflicts } from "../states/conflicts";
 import { getNeighbors } from "../map";
 import { getRelationship } from "../relationships";
+import { goalWeightModifiersForNpc } from "../goals/engine";
+import type { AttemptWhy, ScoreContribution } from "../types";
 
 export function shouldNpcAct(npc: NpcState, worldTick: number): boolean {
   if (isNpcTraveling(npc)) return false;
@@ -64,9 +66,83 @@ function stateWeightModifiers(npc: NpcState) {
   return resolveStateConflicts(npc.activeStates ?? [], defsById);
 }
 
-function goalWeightModifiers(_npc: NpcState) {
-  // Goal system isn't implemented yet (Task 5). Keep plumbing in place.
-  return [];
+function obligationWeightModifiers(npc: NpcState, world: WorldState) {
+  const hourOfDay = world.tick % 24;
+  const mods: { goalId: string; actionKind: Attempt["kind"]; weightDelta: number }[] = [];
+
+  // Simple contextual obligations by role/category (not “personal goals”).
+  if (npc.category === "GuardMilitia") {
+    const onDuty = hourOfDay >= 6 && hourOfDay <= 19;
+    if (onDuty) {
+      mods.push(
+        { goalId: "obligation:guard_duty", actionKind: "patrol", weightDelta: 35 },
+        { goalId: "obligation:guard_duty", actionKind: "investigate", weightDelta: 20 },
+        { goalId: "obligation:guard_duty", actionKind: "arrest", weightDelta: 12 }
+      );
+    } else {
+      // Off duty: bias away from policing.
+      mods.push({ goalId: "obligation:off_duty", actionKind: "patrol", weightDelta: -15 });
+    }
+  }
+
+  // Family time: if at home and family is present, bias idling/travel less (stay).
+  const familyHere = (npc.familyIds ?? []).some((id) => world.npcs[id]?.alive && world.npcs[id]?.siteId === npc.siteId);
+  if (familyHere && npc.siteId === npc.homeSiteId && (hourOfDay >= 18 || hourOfDay <= 7)) {
+    mods.push({ goalId: "obligation:family_time", actionKind: "travel", weightDelta: -20 });
+  }
+
+  // Subsistence baseline: strongly hungry NPCs tend to work even if no explicit goal formed.
+  if ((npc.needs?.Food ?? 0) >= 70) {
+    mods.push(
+      { goalId: "obligation:subsistence", actionKind: "work_farm", weightDelta: 15 },
+      { goalId: "obligation:subsistence", actionKind: "work_fish", weightDelta: 15 },
+      { goalId: "obligation:subsistence", actionKind: "work_hunt", weightDelta: 15 }
+    );
+  }
+
+  return mods;
+}
+
+function topDrivers(contribs: ScoreContribution[], limit = 6): ScoreContribution[] {
+  const filtered = contribs.filter((c) => c.delta !== 0);
+  filtered.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta) || String(a.kind).localeCompare(String(b.kind)));
+  return filtered.slice(0, limit);
+}
+
+function buildWhyFromPicked(npc: NpcState, world: WorldState, picked: { contributions?: ScoreContribution[] }): AttemptWhy {
+  const activeGoalIds = (npc.goals ?? []).map((g) => g.definitionId);
+  const drivers = topDrivers(picked.contributions ?? []);
+
+  const selectedGoalIds = drivers
+    .filter((d) => d.kind === "goalMod" && typeof d.key === "string" && !d.key.startsWith("obligation:"))
+    .map((d) => d.key!) as string[];
+
+  const obligations = Array.from(
+    new Set(
+      drivers
+        .filter((d) => d.kind === "goalMod" && typeof d.key === "string" && d.key.startsWith("obligation:"))
+        .map((d) => d.key!.slice("obligation:".length))
+    )
+  );
+
+  const humanBits: string[] = [];
+  if (obligations.length) humanBits.push(`obligations=${obligations.join(",")}`);
+  if (selectedGoalIds.length) humanBits.push(`goals=${selectedGoalIds.join(",")}`);
+
+  // Add top non-goal drivers.
+  const other = drivers.filter((d) => d.kind !== "goalMod").slice(0, 3);
+  if (other.length) {
+    const parts = other.map((d) => `${d.kind}${d.key ? `:${d.key}` : ""}${d.delta >= 0 ? "+" : ""}${d.delta.toFixed(1)}`);
+    humanBits.push(`drivers=${parts.join(";")}`);
+  }
+
+  return {
+    text: humanBits.length ? humanBits.join(" | ") : "no_strong_drivers",
+    activeGoalIds,
+    selectedGoalIds: Array.from(new Set(selectedGoalIds)),
+    obligations,
+    drivers
+  };
 }
 
 /**
@@ -82,10 +158,26 @@ export function generateScoredAttempt(npc: NpcState, world: WorldState, rng: Rng
   // Bandits: higher raid/steal chance when hungry and in a settlement.
   if (npc.category === "BanditRaider" && site?.kind === "settlement") {
     if ((npc.needs?.Food ?? 0) > 50 && rng.chance(0.2)) {
-      return mkAttempt(npc, world, rng, "raid", 3, "public", undefined, "major");
+      const a = mkAttempt(npc, world, rng, "raid", 3, "public", undefined, "major");
+      a.why = {
+        text: "specialCase=bandit_hungry_raid",
+        activeGoalIds: (npc.goals ?? []).map((g) => g.definitionId),
+        selectedGoalIds: [],
+        obligations: [],
+        drivers: [{ kind: "specialCase", key: "bandit_hungry_raid", delta: 1 }]
+      };
+      return a;
     }
     if (rng.chance(0.15)) {
-      return mkAttempt(npc, world, rng, "steal", 1, "private", undefined, "normal");
+      const a = mkAttempt(npc, world, rng, "steal", 1, "private", undefined, "normal");
+      a.why = {
+        text: "specialCase=bandit_opportunistic_steal",
+        activeGoalIds: (npc.goals ?? []).map((g) => g.definitionId),
+        selectedGoalIds: [],
+        obligations: [],
+        drivers: [{ kind: "specialCase", key: "bandit_opportunistic_steal", delta: 1 }]
+      };
+      return a;
     }
   }
 
@@ -96,7 +188,15 @@ export function generateScoredAttempt(npc: NpcState, world: WorldState, rng: Rng
     targets.sort((a, b) => a.id.localeCompare(b.id));
     const target = targets[0];
     if (target) {
-      return mkAttempt(npc, world, rng, "assault", 1, "public", undefined, "normal", target.id);
+      const a = mkAttempt(npc, world, rng, "assault", 1, "public", undefined, "normal", target.id);
+      a.why = {
+        text: "specialCase=unrest_violence",
+        activeGoalIds: (npc.goals ?? []).map((g) => g.definitionId),
+        selectedGoalIds: [],
+        obligations: [],
+        drivers: [{ kind: "specialCase", key: "unrest_violence", delta: 1 }]
+      };
+      return a;
     }
   }
 
@@ -110,12 +210,31 @@ export function generateScoredAttempt(npc: NpcState, world: WorldState, rng: Rng
     const t = threats[0];
     if (t && rng.chance(0.6)) {
       const kill = rng.chance(0.5);
-      return mkAttempt(npc, world, rng, kill ? "kill" : "assault", 1, "public", undefined, kill ? "major" : "normal", t.subjectId);
+      const a = mkAttempt(
+        npc,
+        world,
+        rng,
+        kill ? "kill" : "assault",
+        1,
+        "public",
+        undefined,
+        kill ? "major" : "normal",
+        t.subjectId
+      );
+      a.why = {
+        text: `specialCase=concord_enforcer_threat kind=${String(t.kind)} confidence=${t.confidence}`,
+        activeGoalIds: (npc.goals ?? []).map((g) => g.definitionId),
+        selectedGoalIds: [],
+        obligations: [],
+        drivers: [{ kind: "belief", key: "witnessed_crime", delta: t.confidence / 100, note: String(t.kind) }]
+      };
+      return a;
     }
   }
 
   const stateMods = stateWeightModifiers(npc);
-  const goalMods = goalWeightModifiers(npc);
+  const goalMods = goalWeightModifiersForNpc(npc, world);
+  const obligationMods = obligationWeightModifiers(npc, world);
 
   // Task 13: site avoidance when fear > 70 toward someone present at the site.
   const fearfulSomeoneHere =
@@ -131,7 +250,13 @@ export function generateScoredAttempt(npc: NpcState, world: WorldState, rng: Rng
       : [];
 
   const defs = [...ACTION_DEFINITIONS, ...IDLE_ACTION_DEFINITIONS];
-  const scored = scoreActions(npc, world, defs, [...stateMods, ...fearAvoidMods, ...homeReturnMods], goalMods);
+  const scored = scoreActions(
+    npc,
+    world,
+    defs,
+    [...stateMods, ...fearAvoidMods, ...homeReturnMods],
+    [...goalMods, ...obligationMods]
+  );
   const picked = selectAction(scored, rng, 10);
 
   if (!picked) {
@@ -175,7 +300,7 @@ export function generateScoredAttempt(npc: NpcState, world: WorldState, rng: Rng
     }
   }
 
-  return mkAttempt(
+  const attempt = mkAttempt(
     npc,
     world,
     rng,
@@ -186,6 +311,8 @@ export function generateScoredAttempt(npc: NpcState, world: WorldState, rng: Rng
     picked.definition.magnitude,
     picked.target
   );
+  attempt.why = buildWhyFromPicked(npc, world, picked);
+  return attempt;
 }
 
 /**

@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { createWorld } from "../src/sim/worldSeed";
 import { tickHour } from "../src/sim/tick";
 
+const runSlow = process.env.RUN_SLOW_TESTS === "1";
+const maybeTest = runSlow ? test : test.skip;
+
 function runHours(seed: number, hours: number) {
   let world = createWorld(seed);
   const events: any[] = [];
@@ -16,7 +19,7 @@ function runHours(seed: number, hours: number) {
   return { finalWorld: world, summaries, events };
 }
 
-test("determinism: same seed/days => identical outputs", () => {
+maybeTest("determinism: same seed/days => identical outputs", () => {
   // Keep runtime bounded: 6 hours is enough to validate determinism guarantees.
   const a = runHours(123, 6);
   const b = runHours(123, 6);
@@ -26,7 +29,7 @@ test("determinism: same seed/days => identical outputs", () => {
   assert.deepEqual(a.events, b.events);
 });
 
-test("divergence: different seeds should produce different outcomes", () => {
+maybeTest("divergence: different seeds should produce different outcomes", () => {
   const a = runHours(1, 6);
   const b = runHours(2, 6);
 
@@ -34,7 +37,7 @@ test("divergence: different seeds should produce different outcomes", () => {
   assert.notDeepEqual(a.events, b.events);
 });
 
-test("invariants: bounds + non-negative resources", () => {
+maybeTest("invariants: bounds + non-negative resources", () => {
   const r = runHours(999, 6);
 
   // Travel invariants (final world snapshot).

@@ -46,9 +46,12 @@ export function NpcPanel(props: Props) {
 
   const selected = world && props.selectedNpcId ? world.npcs[props.selectedNpcId] : null;
   const selectedTopNeed = selected ? topNeed(selected) : null;
+  const goals = selected?.goals ?? [];
+  const intents = selected?.intents ?? [];
+  const recent = selected?.recentActions ?? [];
 
   return (
-    <div style={{ height: "100%", display: "grid", gridTemplateRows: "52px 1fr 220px", minHeight: 0 }}>
+    <div style={{ height: "100%", display: "grid", gridTemplateRows: "52px 1fr 320px", minHeight: 0 }}>
       <div
         style={{
           display: "flex",
@@ -161,6 +164,74 @@ export function NpcPanel(props: Props) {
                 <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 8 }}>
                   status={npcNowLabel(selected, tick)}
                 </div>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, minHeight: 0 }}>
+              <div style={{ minHeight: 0, overflow: "auto" }}>
+                <div style={{ fontWeight: 700, marginBottom: 8 }}>Goals</div>
+                {goals.length === 0 ? (
+                  <div style={{ color: "var(--muted)", fontSize: 12 }}>(none)</div>
+                ) : (
+                  goals
+                    .slice()
+                    .sort((a: any, b: any) => (b.priority ?? 0) - (a.priority ?? 0))
+                    .slice(0, 8)
+                    .map((g: any) => (
+                      <div key={g.definitionId} style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                        <div style={{ color: "var(--text)", fontSize: 12 }}>{g.definitionId}</div>
+                        <div style={{ color: "var(--muted)", fontSize: 12 }}>prio={Math.round(Number(g.priority ?? 0))}</div>
+                      </div>
+                    ))
+                )}
+              </div>
+
+              <div style={{ minHeight: 0, overflow: "auto" }}>
+                <div style={{ fontWeight: 700, marginBottom: 8 }}>Intents</div>
+                {intents.length === 0 ? (
+                  <div style={{ color: "var(--muted)", fontSize: 12 }}>(none)</div>
+                ) : (
+                  intents
+                    .slice()
+                    .sort((a: any, b: any) => (b.intensity ?? 0) - (a.intensity ?? 0))
+                    .slice(0, 8)
+                    .map((it: any) => (
+                      <div key={it.id} style={{ marginBottom: 6 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                          <div style={{ color: "var(--text)", fontSize: 12 }}>{it.kind}</div>
+                          <div style={{ color: "var(--muted)", fontSize: 12 }}>{Math.round(Number(it.intensity ?? 0))}</div>
+                        </div>
+                        {it.whyText ? <div style={{ color: "rgba(255,255,255,0.65)", fontSize: 12 }}>{it.whyText}</div> : null}
+                        {typeof it.executeAtTick === "number" ? (
+                          <div style={{ color: "var(--muted)", fontSize: 12 }}>exec@t{it.executeAtTick}</div>
+                        ) : null}
+                      </div>
+                    ))
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, minHeight: 0 }}>
+              <div style={{ minHeight: 0, overflow: "auto" }}>
+                <div style={{ fontWeight: 700, marginBottom: 8 }}>Recent actions</div>
+                {recent.length === 0 ? (
+                  <div style={{ color: "var(--muted)", fontSize: 12 }}>(none)</div>
+                ) : (
+                  recent
+                    .slice(-10)
+                    .reverse()
+                    .map((a: any, i: number) => (
+                      <div key={i} style={{ marginBottom: 6 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                          <div style={{ color: "var(--text)", fontSize: 12 }}>{a.kind}</div>
+                          <div style={{ color: "var(--muted)", fontSize: 12 }}>t{a.tick}</div>
+                        </div>
+                        {a.why?.text ? (
+                          <div style={{ color: "rgba(255,255,255,0.65)", fontSize: 12, marginTop: 2 }}>{a.why.text}</div>
+                        ) : null}
+                      </div>
+                    ))
+                )}
               </div>
             </div>
           </div>

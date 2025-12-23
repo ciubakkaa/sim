@@ -25,7 +25,7 @@
     "sim:npcs": "npm run build && node dist/cli.js npcs",
     "sim:npc": "npm run build && node dist/cli.js npc",
     "sim:npc:history": "npm run build && node dist/cli.js npc-history",
-    "viewer:service": "npm run build && node dist/cli.js viewer --seed 1 --port 8787 --ms-per-tick 60000 --play",
+    "viewer:service": "npm run build && node dist/cli.js viewer --seed 1 --port 8787 --ms-per-tick 60000 --play --save-events --persist-run",
     "viewer:ui": "cd ui && npm run dev",
 
     "sim:npcs:villageA": "npm run build && node dist/cli.js npcs --days 0 --seed 1 --site HumanVillageA --limit 30",

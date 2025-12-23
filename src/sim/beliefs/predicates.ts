@@ -13,6 +13,7 @@ export const BELIEF_PREDICATES = [
 
   // Crime/violence + danger
   "witnessed_crime",
+  "witnessed_intent",
   "cult_activity_nearby",
   "identified_cult_member",
 

@@ -6,11 +6,13 @@ import { getRelationship } from "../relationships";
 import { checkPreconditions } from "./preconditions";
 import { selectTarget } from "./targets";
 import type { ActionDefinition, SiteConditionWeight } from "./types";
+import type { ScoreContribution } from "../types";
 
 export type ScoredAction = {
   definition: ActionDefinition;
   score: number;
   target?: NpcId;
+  contributions?: ScoreContribution[];
 };
 
 function isSettlement(site: SiteState): site is SettlementSiteState {
@@ -53,31 +55,54 @@ export function scoreActions(
     if (def.targetSelector && !target) continue;
 
     let score = def.baseWeight;
+    const contributions: ScoreContribution[] = [{ kind: "base", delta: def.baseWeight }];
 
     // Need contributions (need value is 0..100; weights are multipliers).
     for (const [need, weight] of Object.entries(def.needWeights)) {
       const v = npc.needs[need as keyof NpcState["needs"]] ?? 0;
-      score += v * (weight ?? 0);
+      const delta = v * (weight ?? 0);
+      score += delta;
+      if (delta !== 0) contributions.push({ kind: "need", key: need, delta, note: `v=${v}` });
     }
 
     // Trait contributions (trait value is 0..100; weights are multipliers).
     for (const [trait, weight] of Object.entries(def.traitWeights)) {
       const v = npc.traits[trait as TraitKey] ?? 0;
-      score += v * (weight ?? 0);
+      const delta = v * (weight ?? 0);
+      score += delta;
+      if (delta !== 0) contributions.push({ kind: "trait", key: trait, delta, note: `v=${v}` });
     }
 
     // Site condition contributions.
     const site = world.sites[npc.siteId];
     if (site) {
       for (const cond of def.siteConditionWeights) {
-        if (checkSiteCondition(site, cond)) score += cond.weight;
+        if (checkSiteCondition(site, cond)) {
+          score += cond.weight;
+          if (cond.weight !== 0)
+            contributions.push({
+              kind: "siteCondition",
+              key: `${cond.field}${cond.op}${cond.threshold}`,
+              delta: cond.weight
+            });
+        }
       }
     }
 
     // Belief contributions (scaled by confidence).
     for (const bw of def.beliefWeights) {
       const belief = npc.beliefs.find((b) => b.predicate === bw.predicate);
-      if (belief) score += (belief.confidence / 100) * bw.weight;
+      if (belief) {
+        const delta = (belief.confidence / 100) * bw.weight;
+        score += delta;
+        if (delta !== 0)
+          contributions.push({
+            kind: "belief",
+            key: bw.predicate,
+            delta,
+            note: `confidence=${belief.confidence}`
+          });
+      }
     }
 
     // Relationship contributions (only meaningful with a target).
@@ -91,15 +116,32 @@ export function scoreActions(
 
         for (const rw of def.relationshipWeights) {
           const v = rel[rw.field] ?? 0;
-          if (rw.op === ">" && v > rw.threshold) score += rw.weight;
-          else if (rw.op === "<" && v < rw.threshold) score += rw.weight;
+          const ok = (rw.op === ">" && v > rw.threshold) || (rw.op === "<" && v < rw.threshold);
+          if (ok) {
+            score += rw.weight;
+            if (rw.weight !== 0)
+              contributions.push({
+                kind: "relationship",
+                key: String(rw.field),
+                delta: rw.weight,
+                note: `${rw.op}${rw.threshold} v=${v}`
+              });
+          }
         }
       }
     }
 
     // Reactive state modifiers.
     for (const mod of stateModifiers) {
-      if (mod.actionKind === def.kind || mod.actionKind === "*") score += mod.weightDelta;
+      if (mod.actionKind === def.kind || mod.actionKind === "*") {
+        score += mod.weightDelta;
+        if (mod.weightDelta !== 0)
+          contributions.push({
+            kind: "stateMod",
+            key: mod.actionKind === "*" ? "*" : def.kind,
+            delta: mod.weightDelta
+          });
+      }
     }
 
     // Goal modifiers.
@@ -107,12 +149,21 @@ export function scoreActions(
       if (mod.actionKind !== def.kind) continue;
       if (mod.requiresTarget && !target) continue;
       score += mod.weightDelta;
+      if (mod.weightDelta !== 0)
+        contributions.push({
+          kind: "goalMod",
+          key: mod.goalId,
+          delta: mod.weightDelta
+        });
     }
 
     // Task 15: flee bonus when low HP.
-    if (def.kind === "travel" && npc.hp < 20) score += 50;
+    if (def.kind === "travel" && npc.hp < 20) {
+      score += 50;
+      contributions.push({ kind: "specialCase", key: "low_hp_flee", delta: 50 });
+    }
 
-    if (score > 0) results.push({ definition: def, score, target });
+    if (score > 0) results.push({ definition: def, score, target, contributions });
   }
 
   return results.sort((a, b) => b.score - a.score || a.definition.kind.localeCompare(b.definition.kind));

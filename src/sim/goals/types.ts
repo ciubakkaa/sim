@@ -17,7 +17,11 @@ export type GoalTrigger =
   | { type: "needProlonged"; need: NeedKey; threshold: number; hours: number }
   | { type: "relationshipWith"; field: keyof Relationship; op: ">" | "<"; value: number }
   | { type: "witnessedEvent"; kind: AttemptKind }
-  | { type: "stateActive"; stateId: string };
+  | { type: "stateActive"; stateId: string }
+  | { type: "categoryIs"; category: NpcCategory }
+  | { type: "cultMember"; member: boolean }
+  | { type: "hasFamily"; minCount: number }
+  | { type: "familyAtSameSite"; minCount: number };
 
 export type GoalCondition =
   | { type: "targetDead"; targetField: string }
@@ -32,6 +36,7 @@ export type GoalCondition =
   | { type: "needThreshold"; need: NeedKey; op: ">" | "<"; value: number };
 
 export type GoalWeightModifier = {
+  goalId: string;
   actionKind: AttemptKind;
   weightDelta: number;
   requiresTarget?: boolean;

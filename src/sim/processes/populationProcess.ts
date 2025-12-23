@@ -140,6 +140,7 @@ export function applyPopulationProcessDaily(world: WorldState, ctx: ProcessConte
           familyIds: [],
           activeStates: [],
           goals: [],
+          intents: [],
           proficiency: {},
           recentActions: [],
           consecutiveHungerHours: 0,
@@ -156,6 +157,7 @@ export function applyPopulationProcessDaily(world: WorldState, ctx: ProcessConte
           lastAttemptTick: -999,
           forcedActiveUntilTick: 0,
           busyUntilTick: 0,
+          pendingAttempt: undefined,
           beliefs: [],
           relationships: {}
         };

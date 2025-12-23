@@ -6,6 +6,7 @@ import { isSettlement } from "../rumors";
 import { markBusy } from "../../busy";
 import { makeId } from "../../ids";
 import { addBelief } from "../../beliefs";
+import { isNpcTraveling } from "../../movement";
 
 function getTarget(world: WorldState, attempt: Attempt): NpcState | undefined {
   if (!attempt.targetId) return undefined;
@@ -25,11 +26,16 @@ export function resolveAssault(world: WorldState, attempt: Attempt, ctx: Resolve
   const actor = h.world.npcs[attempt.actorId];
   const target = getTarget(h.world, attempt);
   if (!actor || !actor.alive || !target || !target.alive) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+  if (isNpcTraveling(actor) || isNpcTraveling(target)) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
   if (actor.siteId !== attempt.siteId || target.siteId !== attempt.siteId) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
 
   // Task 15: combat outcome based on attacker offense vs defender defense.
   const score = combatOffense(actor);
-  const resist = combatDefense(target);
+  const defendBonus =
+    target.busyKind === "defend" && target.busyUntilTick > h.world.tick
+      ? clamp(10 + (target.traits.Discipline / 100) * 10 + (target.traits.Courage / 100) * 10, 10, 30)
+      : 0;
+  const resist = combatDefense(target) + defendBonus;
   const chance = clamp(50 + (score - resist) * 0.4, 5, 90);
   const roll = ctx.rng.int(0, 99);
   const success = roll < chance;
@@ -130,11 +136,16 @@ export function resolveKill(world: WorldState, attempt: Attempt, ctx: ResolveCtx
   const actor = h.world.npcs[attempt.actorId];
   const target = getTarget(h.world, attempt);
   if (!actor || !actor.alive || !target || !target.alive) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+  if (isNpcTraveling(actor) || isNpcTraveling(target)) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
   if (actor.siteId !== attempt.siteId || target.siteId !== attempt.siteId) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
 
   // Task 15: base kill success ~30% with trait modifiers.
   const score = combatOffense(actor);
-  const resist = combatDefense(target);
+  const defendBonus =
+    target.busyKind === "defend" && target.busyUntilTick > h.world.tick
+      ? clamp(10 + (target.traits.Discipline / 100) * 10 + (target.traits.Courage / 100) * 10, 10, 30)
+      : 0;
+  const resist = combatDefense(target) + defendBonus;
   const chance = clamp(30 + (score - resist) * 0.35, 2, 80);
   const roll = ctx.rng.int(0, 99);
   const success = roll < chance;

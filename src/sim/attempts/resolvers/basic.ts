@@ -12,6 +12,47 @@ import { addFoodLot } from "../../food";
 import { addBelief } from "../../beliefs";
 import { addFoodToBuilding, pickLocationByKinds } from "../../localRules";
 
+export function resolveDefend(world: WorldState, attempt: Attempt, ctx: ResolveCtx): ResolveResult {
+  const h = makeHelpers(world, attempt, ctx);
+  const actor = h.world.npcs[attempt.actorId];
+  if (!actor || !actor.alive) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+  if (actor.siteId !== attempt.siteId) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+
+  const hours = Math.max(1, Math.min(2, Math.floor(attempt.durationHours || 1)));
+  h.apply({
+    kind: "npc.patch",
+    npcId: actor.id,
+    patch: { lastAttemptTick: attempt.tick, ...markBusy(actor, h.world.tick, hours, "defend") } as Partial<NpcState>
+  });
+  h.emit(`${actor.name} braced for trouble`, { hours });
+  return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+}
+
+export function resolveIntervene(world: WorldState, attempt: Attempt, ctx: ResolveCtx): ResolveResult {
+  const h = makeHelpers(world, attempt, ctx);
+  const actor = h.world.npcs[attempt.actorId];
+  const target = attempt.targetId ? h.world.npcs[attempt.targetId] : undefined;
+  if (!actor || !actor.alive || !target || !target.alive) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+  if (actor.siteId !== attempt.siteId || target.siteId !== attempt.siteId) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+
+  // Stop target's pending attempt if any, and briefly stagger both parties.
+  h.apply({
+    kind: "npc.patch",
+    npcId: target.id,
+    patch: { pendingAttempt: undefined, busyUntilTick: h.world.tick + 1, busyKind: "intervene" } as any
+  });
+  h.apply({
+    kind: "npc.patch",
+    npcId: actor.id,
+    patch: { lastAttemptTick: attempt.tick, ...markBusy(actor, h.world.tick, 1, "intervene") } as Partial<NpcState>
+  });
+
+  const role = (attempt.resources as any)?.role;
+  h.emit(`${actor.name} intervened`, { role, stopped: true, targetId: target.id });
+  if (attempt.visibility === "public") h.addPublicRumor(`${actor.name} intervened to stop violence`, 55);
+  return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+}
+
 export function resolveTravel(world: WorldState, attempt: Attempt, ctx: ResolveCtx): ResolveResult {
   const h = makeHelpers(world, attempt, ctx);
   const actor = h.world.npcs[attempt.actorId];

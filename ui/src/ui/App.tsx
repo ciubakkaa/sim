@@ -4,6 +4,7 @@ import { EventFeed } from "./components/EventFeed";
 import { MapCanvas } from "./components/MapCanvas";
 import { NpcPanel } from "./components/NpcPanel";
 import { BuildingPanel } from "./components/BuildingPanel";
+import { LogView } from "./log/LogView";
 import "./theme.css";
 
 type ConnectionState = "disconnected" | "connecting" | "connected";
@@ -23,6 +24,7 @@ async function postControl(serviceUrl: string, action: ControlAction): Promise<v
 
 export function App() {
   const [serviceUrl, setServiceUrl] = useState(defaultServiceUrl);
+  const [mode, setMode] = useState<"live" | "log">("live");
   const [conn, setConn] = useState<ConnectionState>("disconnected");
   const [settings, setSettings] = useState<ViewerSettings | null>(null);
   const [layout, setLayout] = useState<MapLayout | null>(null);
@@ -85,6 +87,16 @@ export function App() {
   };
 
   useEffect(() => {
+    if (mode !== "live") {
+      try {
+        esRef.current?.close();
+      } catch {
+        // ignore
+      }
+      setConn("disconnected");
+      return;
+    }
+
     connect();
     return () => {
       try {
@@ -94,7 +106,7 @@ export function App() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serviceUrl]);
+  }, [serviceUrl, mode]);
 
   const header = useMemo(() => {
     if (!world || !settings) return "Sim Engine Viewer";
@@ -107,6 +119,56 @@ export function App() {
   const canControl = conn === "connected" && Boolean(settings);
   const selectedSite = selectedSiteId && world ? (world.sites as any)[selectedSiteId] : null;
   const isSettlementSelected = Boolean(selectedSite && (selectedSite as any).kind === "settlement" && (selectedSite as any).local);
+
+  if (mode === "log") {
+    return (
+      <div style={{ height: "100vh", display: "grid", gridTemplateRows: "56px 1fr", gap: 12, padding: 12 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "10px 12px",
+            border: "1px solid var(--border)",
+            borderRadius: 12,
+            background: "var(--panel)"
+          }}
+        >
+          <div style={{ fontWeight: 700, letterSpacing: 0.2 }}>Sim Engine Viewer</div>
+          <div style={{ flex: 1 }} />
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setMode("live")} style={btnStyle}>
+              Live
+            </button>
+            <button onClick={() => setMode("log")} style={{ ...btnStyle, borderColor: "rgba(255,255,255,0.35)" }}>
+              Log
+            </button>
+          </div>
+
+          <label style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--muted)" }}>
+            Service
+            <input
+              value={serviceUrl}
+              onChange={(e) => setServiceUrl(e.target.value)}
+              style={{
+                width: 330,
+                background: "rgba(0,0,0,0.25)",
+                border: "1px solid var(--border)",
+                borderRadius: 10,
+                padding: "8px 10px",
+                color: "var(--text)"
+              }}
+            />
+          </label>
+        </div>
+
+        <div style={{ ...panelStyle, overflow: "hidden" }}>
+          <LogView serviceUrl={serviceUrl} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ height: "100vh", display: "grid", gridTemplateRows: "56px 1fr", gap: 12, padding: 12 }}>
@@ -124,6 +186,15 @@ export function App() {
         <div style={{ fontWeight: 700, letterSpacing: 0.2 }}>{header}</div>
 
         <div style={{ flex: 1 }} />
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => setMode("live")} style={{ ...btnStyle, borderColor: "rgba(255,255,255,0.35)" }}>
+            Live
+          </button>
+          <button onClick={() => setMode("log")} style={btnStyle}>
+            Log
+          </button>
+        </div>
 
         <label style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--muted)" }}>
           Service

@@ -207,6 +207,8 @@ export type AttemptKind =
   | "idle"
   | "travel"
   | "patrol"
+  | "defend"
+  | "intervene"
   | "work_farm"
   | "work_fish"
   | "work_hunt"
@@ -227,6 +229,77 @@ export type AttemptVisibility = "private" | "public";
 
 export type AttemptMagnitude = "minor" | "normal" | "major";
 
+export type IntentKind =
+  | "attack"
+  | "raid_plan"
+  | "steal"
+  | "arrest"
+  | "investigate"
+  | "travel"
+  | "work"
+  | "preach"
+  | "heal";
+
+export type NpcIntent = {
+  id: string;
+  kind: IntentKind;
+  formedTick: SimTick;
+  /**
+   * Strength 0..100. Higher increases chance to turn into an attempt later.
+   */
+  intensity: number;
+  executeAtTick?: SimTick;
+  targetNpcId?: NpcId;
+  targetSiteId?: SiteId;
+  lastSignaledTick?: SimTick;
+  whyText?: string;
+  data?: Record<string, unknown>;
+};
+
+export type ScoreContribution = {
+  kind:
+    | "base"
+    | "need"
+    | "trait"
+    | "belief"
+    | "relationship"
+    | "siteCondition"
+    | "stateMod"
+    | "goalMod"
+    | "specialCase"
+    | "obligation";
+  key?: string; // e.g. need name, trait name, predicate, stateId, goalId, obligationId
+  delta: number;
+  note?: string;
+};
+
+export type AttemptWhy = {
+  /**
+   * Short human-readable explanation for logs/UI.
+   * Keep it short; detailed breakdown lives in `drivers`.
+   */
+  text: string;
+  /**
+   * Active goals on the actor at decision time (parallel goals).
+   * These are ids (definition ids).
+   */
+  activeGoalIds: string[];
+  /**
+   * Subset of active goals that materially pushed this action choice.
+   */
+  selectedGoalIds: string[];
+  /**
+   * Contextual duties/responsibilities not tied to a single long-term goal.
+   * Example: guard_duty, cult_duty, subsistence_work.
+   */
+  obligations: string[];
+  /**
+   * Score breakdown/top drivers used to generate `text`.
+   * Deltas are in the same units as action scoring weights.
+   */
+  drivers: ScoreContribution[];
+};
+
 export type Attempt = {
   id: string;
   tick: SimTick;
@@ -238,6 +311,7 @@ export type Attempt = {
   durationHours: number;
   intentMagnitude: AttemptMagnitude;
   resources?: Record<string, unknown>;
+  why?: AttemptWhy;
 };
 
 export type EventKind =
@@ -248,6 +322,13 @@ export type EventKind =
   | "local.travel.started"
   | "local.travel.arrived"
   | "local.action.performed"
+  | "intent.signaled"
+  | "opportunity.created"
+  | "opportunity.responded"
+  | "attempt.started"
+  | "attempt.aborted"
+  | "attempt.interrupted"
+  | "attempt.completed"
   | "world.food.produced"
   | "world.food.consumed"
   | "world.food.spoiled"
@@ -411,8 +492,9 @@ export type NpcState = {
   // AI state (scoring/states/goals/proficiency; introduced in v2 AI spec).
   activeStates: ActiveState[];
   goals: ActiveGoal[];
+  intents: NpcIntent[];
   proficiency: Partial<Record<ProficiencyDomain, number>>;
-  recentActions: { kind: AttemptKind; tick: SimTick }[]; // rolling window (implemented later)
+  recentActions: { kind: AttemptKind; tick: SimTick; why?: AttemptWhy }[]; // rolling window
   consecutiveHungerHours: number;
   stateTriggerMemory: Record<string, SimTick>;
 
@@ -476,6 +558,13 @@ export type NpcState = {
   forcedActiveUntilTick: SimTick;
   busyUntilTick: SimTick;
   busyKind?: AttemptKind;
+
+  // Attempt lifecycle (v-next): a started attempt that hasn't reached its consequence-application phase yet.
+  pendingAttempt?: {
+    startedTick: SimTick;
+    executeAtTick: SimTick;
+    attempt: Attempt;
+  };
 
   // knowledge + relationships
   beliefs: Belief[]; // bounded

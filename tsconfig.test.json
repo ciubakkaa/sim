@@ -3,6 +3,8 @@
   "compilerOptions": {
     "rootDir": ".",
     "outDir": "./dist-test",
+    "incremental": true,
+    "tsBuildInfoFile": "./dist-test/tsconfig.test.tsbuildinfo",
     "sourceMap": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]

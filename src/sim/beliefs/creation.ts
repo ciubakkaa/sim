@@ -21,6 +21,27 @@ export function applyBeliefsFromEvents(world: WorldState, events: SimEvent[]): W
   let next = world;
 
   for (const e of events) {
+    if (e.kind === "intent.signaled") {
+      const d: any = e.data ?? {};
+      const actorId = d.actorId as NpcId | undefined;
+      const intentKind = d.intentKind as string | undefined;
+      if (actorId && e.siteId && typeof intentKind === "string") {
+        const witnesses = npcsAtSite(next, e.siteId);
+        const conf = clamp(40 + (Number(d.intensity ?? 0) * 0.4), 40, 90);
+        for (const w of witnesses) {
+          next = addBeliefToNpc(next, w.id, {
+            subjectId: actorId,
+            predicate: "witnessed_intent",
+            object: intentKind,
+            confidence: conf,
+            source: "witnessed",
+            tick: next.tick
+          });
+        }
+      }
+      continue;
+    }
+
     if (e.kind !== "attempt.recorded") continue;
     const attempt = e.data?.attempt as Attempt | undefined;
     if (!attempt) continue;

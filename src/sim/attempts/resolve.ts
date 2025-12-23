@@ -7,14 +7,26 @@ import { resolveArrest, resolveKidnap, resolveTrade } from "./resolvers/control"
 import { resolveAssault, resolveKill, resolveRaid } from "./resolvers/violence";
 import { resolveAnchorSever, resolveForcedEclipse } from "./resolvers/eclipsing";
 import {
+  resolveDefend,
   resolveHeal,
   resolveInvestigate,
+  resolveIntervene,
   resolvePatrol,
   resolvePreach,
   resolveSteal,
   resolveTravel,
   resolveWork
 } from "./resolvers/basic";
+
+function appendRecentAction(world: WorldState, attempt: Attempt): WorldState {
+  const actor = world.npcs[attempt.actorId];
+  if (!actor) return world;
+  const prev = actor.recentActions ?? [];
+  const next = [...prev, { kind: attempt.kind, tick: attempt.tick, why: attempt.why }].slice(-40);
+  if (prev.length === next.length && prev[prev.length - 1]?.kind === next[next.length - 1]?.kind && prev[prev.length - 1]?.tick === next[next.length - 1]?.tick)
+    return world;
+  return { ...world, npcs: { ...world.npcs, [actor.id]: { ...actor, recentActions: next } } };
+}
 
 export function resolveAndApplyAttempt(
   world: WorldState,
@@ -101,7 +113,7 @@ export function resolveAndApplyAttempt(
         }
       }
     };
-    return { world: next, events: extraEvents, keyChanges: [] };
+    return { world: appendRecentAction(next, attempt), events: extraEvents, keyChanges: [] };
   }
 
   // Attach locationId for observability when inside a settlement.
@@ -114,19 +126,21 @@ export function resolveAndApplyAttempt(
       : attempt;
 
   const wrap = (r: { world: WorldState; events: SimEvent[]; keyChanges: string[] }) => ({
-    world: r.world,
+    world: appendRecentAction(r.world, attemptWithLocation),
     events: [...extraEvents, ...r.events],
     keyChanges: r.keyChanges
   });
 
   if (attempt.kind === "travel") return wrap(resolveTravel(nextWorld, attemptWithLocation, ctx));
   if (attempt.kind === "patrol") return wrap(resolvePatrol(nextWorld, attemptWithLocation, ctx));
+  if (attempt.kind === "defend") return wrap(resolveDefend(nextWorld, attemptWithLocation, ctx));
   if (attempt.kind === "work_farm" || attempt.kind === "work_fish" || attempt.kind === "work_hunt")
     return wrap(resolveWork(nextWorld, attemptWithLocation, ctx));
   if (attempt.kind === "heal") return wrap(resolveHeal(nextWorld, attemptWithLocation, ctx));
   if (attempt.kind === "preach_fixed_path") return wrap(resolvePreach(nextWorld, attemptWithLocation, ctx));
   if (attempt.kind === "investigate") return wrap(resolveInvestigate(nextWorld, attemptWithLocation, ctx));
   if (attempt.kind === "steal") return wrap(resolveSteal(nextWorld, attemptWithLocation, ctx));
+  if (attempt.kind === "intervene") return wrap(resolveIntervene(nextWorld, attemptWithLocation, ctx));
 
   if (attempt.kind === "trade") return wrap(resolveTrade(nextWorld, attemptWithLocation, ctx));
   if (attempt.kind === "assault") return wrap(resolveAssault(nextWorld, attemptWithLocation, ctx));

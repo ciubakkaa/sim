@@ -28,6 +28,55 @@ export type SimEvent = {
   data?: Record<string, unknown>;
 };
 
+export type ScoreContribution = {
+  kind:
+    | "base"
+    | "need"
+    | "trait"
+    | "belief"
+    | "relationship"
+    | "siteCondition"
+    | "stateMod"
+    | "goalMod"
+    | "specialCase"
+    | "obligation";
+  key?: string;
+  delta: number;
+  note?: string;
+};
+
+export type AttemptWhy = {
+  text: string;
+  activeGoalIds: string[];
+  selectedGoalIds: string[];
+  obligations: string[];
+  drivers: ScoreContribution[];
+};
+
+export type ActiveGoal = {
+  definitionId: string;
+  formedTick: number;
+  targetNpcId?: string;
+  targetSiteId?: string;
+  priority: number;
+  data: Record<string, unknown>;
+};
+
+export type RecentAction = { kind: string; tick: number; why?: AttemptWhy };
+
+export type NpcIntent = {
+  id: string;
+  kind: string;
+  formedTick: number;
+  intensity: number;
+  executeAtTick?: number;
+  targetNpcId?: string;
+  targetSiteId?: string;
+  lastSignaledTick?: number;
+  whyText?: string;
+  data?: Record<string, unknown>;
+};
+
 export type NpcState = {
   id: string;
   name: string;
@@ -35,6 +84,9 @@ export type NpcState = {
   siteId: string;
   homeSiteId: string;
   familyIds?: string[];
+  goals?: ActiveGoal[];
+  intents?: NpcIntent[];
+  recentActions?: RecentAction[];
   alive: boolean;
   homeLocationId?: string;
   local?: { siteId: string; locationId: string };
