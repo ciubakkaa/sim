@@ -547,12 +547,25 @@ async function main() {
       return;
     }
 
-    const seed = 1;
+    const seed = numFlag(flags, "seed", 1);
     const res = runSimulation({ days, seed });
     const outPath = defaultEventsOutPath({ seed, days });
     await writeEventsJsonl(outPath, res.events);
     console.log(`Saved ${res.events.length} events to ${outPath}`);
     console.log("");
+
+    // Persist for log viewer (default on for story).
+    const worldsDir = strFlag(flags, "worlds-dir") ?? defaultWorldsBaseDir();
+    const runId = strFlag(flags, "run-id");
+    const p = ensurePersistedRunDir({ seed, baseDir: worldsDir, runId });
+    const nowIso = new Date().toISOString();
+    writeRunMeta(p, { version: 1, seed, runId: p.runId, startedAt: nowIso, argv: process.argv, note: `story days=${days}` });
+    // For story runs, snapshot the final world so the viewer matches the end-state of the log.
+    writeRunSnapshot(p, { version: 1, seed, createdAt: nowIso, world: res.finalWorld, map: res.finalWorld.map });
+    await writeEventsJsonl(p.eventsPath, res.events);
+    console.log(`Persisted run for viewer: seed=${seed} run=${p.runId} dir=${p.runDir}`);
+    console.log("");
+
     await summarizeLog(outPath, { sampleDays: [0, 7, 30, 60, 90, 120, 150, days - 1].filter((d) => d >= 0) });
     return;
   }

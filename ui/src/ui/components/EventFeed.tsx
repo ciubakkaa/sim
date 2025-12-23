@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import type { SimEvent, WorldState } from "../../lib/protocol";
 import { getAttempt, getPrimaryActorId } from "../log/metrics";
-import { groupEventsByAction } from "../log/grouping";
+import { groupEventsByAction, type ActionGroup } from "../log/grouping";
 
 type Props = {
   events: SimEvent[];
@@ -80,6 +80,72 @@ export function EventFeed(props: Props) {
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
+    });
+  }
+
+  function renderActionGroups(groups: ActionGroup[], selectedEventId?: string | null) {
+    const visibleGroups = groups.slice(-120);
+    return visibleGroups.map((g) => {
+      const open = openGroups.has(`action:${g.id}`);
+      const rep = g.events.find((e) => e.kind === "attempt.started") ?? g.events[g.events.length - 1];
+      return (
+        <div key={g.id} style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+          <button
+            onClick={() => {
+              toggleOpen(`action:${g.id}`);
+              if (rep?.id) props.onSelectEventId?.(rep.id);
+            }}
+            style={{
+              width: "100%",
+              ...rowStyle,
+              border: "none",
+              borderRadius: 0,
+              background: "rgba(0,0,0,0.18)",
+              cursor: "pointer"
+            }}
+          >
+            <div style={{ color: "var(--muted)", fontSize: 12, width: 92, flexShrink: 0 }}>
+              t{g.startTick}
+              {g.endTick !== g.startTick ? `→t${g.endTick}` : ""} • action
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+                <div style={{ fontSize: 13, fontWeight: 700 }}>{g.title}</div>
+                <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                  {open ? "▼" : "▶"} {g.events.length} events
+                </div>
+              </div>
+              {g.subtitle ? <div style={{ color: "rgba(255,255,255,0.75)", fontSize: 12, marginTop: 6 }}>{g.subtitle}</div> : null}
+            </div>
+          </button>
+
+          {open ? (
+            <div style={{ padding: 10, background: "rgba(0,0,0,0.10)", display: "flex", flexDirection: "column", gap: 8 }}>
+              {g.events.map((e) => (
+                <button
+                  key={e.id}
+                  onClick={() => props.onSelectEventId?.(e.id)}
+                  style={{
+                    ...subRowStyle,
+                    borderColor: e.id === selectedEventId ? "rgba(255,255,255,0.35)" : "var(--border)",
+                    background: e.id === selectedEventId ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.12)"
+                  }}
+                >
+                  <div style={{ color: "var(--muted)", fontSize: 12, width: 120, flexShrink: 0 }}>
+                    t{e.tick} • {compactKind(e.kind)}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12 }}>{e.message}</div>
+                    <div style={{ color: "var(--muted)", fontSize: 11 }}>
+                      {e.siteId ? `@${e.siteId}` : ""} {e.visibility ? `• ${e.visibility}` : ""}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      );
     });
   }
 
@@ -165,76 +231,10 @@ export function EventFeed(props: Props) {
 
               if (viewMode === "action") {
                 const { groups, ungrouped } = groupEventsByAction(filtered, props.world);
-                const visibleGroups = groups.slice(-120);
                 const visibleUngrouped = ungrouped.slice(-80);
-
                 return (
                   <>
-                    {visibleGroups.map((g) => {
-                      const open = openGroups.has(g.id);
-                      return (
-                        <div key={g.id} style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
-                          <button
-                            onClick={() => {
-                              toggleOpen(g.id);
-                              const rep = g.events.find((e) => e.kind === "attempt.started") ?? g.events[g.events.length - 1];
-                              if (rep?.id) props.onSelectEventId?.(rep.id);
-                            }}
-                            style={{
-                              width: "100%",
-                              ...rowStyle,
-                              border: "none",
-                              borderRadius: 0,
-                              background: "rgba(0,0,0,0.18)",
-                              cursor: "pointer"
-                            }}
-                          >
-                            <div style={{ color: "var(--muted)", fontSize: 12, width: 92, flexShrink: 0 }}>
-                              t{g.startTick}
-                              {g.endTick !== g.startTick ? `→t${g.endTick}` : ""} • action
-                            </div>
-                            <div style={{ flex: 1 }}>
-                              <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-                                <div style={{ fontSize: 13, fontWeight: 700 }}>{g.title}</div>
-                                <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                                  {open ? "▼" : "▶"} {g.events.length} events
-                                </div>
-                              </div>
-                              {g.subtitle ? (
-                                <div style={{ color: "rgba(255,255,255,0.75)", fontSize: 12, marginTop: 6 }}>{g.subtitle}</div>
-                              ) : null}
-                            </div>
-                          </button>
-
-                          {open ? (
-                            <div style={{ padding: 10, background: "rgba(0,0,0,0.10)", display: "flex", flexDirection: "column", gap: 8 }}>
-                              {g.events.map((e) => (
-                                <button
-                                  key={e.id}
-                                  onClick={() => props.onSelectEventId?.(e.id)}
-                                  style={{
-                                    ...subRowStyle,
-                                    borderColor: e.id === props.selectedEventId ? "rgba(255,255,255,0.35)" : "var(--border)",
-                                    background: e.id === props.selectedEventId ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.12)"
-                                  }}
-                                >
-                                  <div style={{ color: "var(--muted)", fontSize: 12, width: 120, flexShrink: 0 }}>
-                                    t{e.tick} • {compactKind(e.kind)}
-                                  </div>
-                                  <div style={{ flex: 1 }}>
-                                    <div style={{ fontSize: 12 }}>{e.message}</div>
-                                    <div style={{ color: "var(--muted)", fontSize: 11 }}>
-                                      {e.siteId ? `@${e.siteId}` : ""} {e.visibility ? `• ${e.visibility}` : ""}
-                                    </div>
-                                  </div>
-                                </button>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-
+                    {renderActionGroups(groups, props.selectedEventId)}
                     {visibleUngrouped.length ? (
                       <div style={{ marginTop: 6 }}>
                         <div style={{ color: "var(--muted)", fontSize: 12, margin: "6px 0" }}>Other events</div>
@@ -298,12 +298,14 @@ export function EventFeed(props: Props) {
               const visible = groups.slice(0, 120);
 
               return visible.map((g) => {
-                const open = openGroups.has(g.id);
-                const shownEvents = g.events.slice(-120);
+                const outerId = `outer:${g.id}`;
+                const open = openGroups.has(outerId);
+                const { groups: actionGroups, ungrouped } = groupEventsByAction(g.events, props.world);
+                const shownUngrouped = ungrouped.slice(-80);
                 return (
                   <div key={g.id} style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
                     <button
-                      onClick={() => toggleOpen(g.id)}
+                      onClick={() => toggleOpen(outerId)}
                       style={{
                         width: "100%",
                         ...rowStyle,
@@ -321,38 +323,45 @@ export function EventFeed(props: Props) {
                         <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
                           <div style={{ fontSize: 13, fontWeight: 700 }}>{g.label || "(none)"}</div>
                           <div style={{ color: "var(--muted)", fontSize: 12 }}>
-                            {open ? "▼" : "▶"} {g.events.length} events
+                            {open ? "▼" : "▶"} {g.events.length} events • {actionGroups.length} actions
                           </div>
-                        </div>
-                        <div style={{ color: "rgba(255,255,255,0.65)", fontSize: 12, marginTop: 6 }}>
-                          Showing last {shownEvents.length} in this group
                         </div>
                       </div>
                     </button>
 
                     {open ? (
-                      <div style={{ padding: 10, background: "rgba(0,0,0,0.10)", display: "flex", flexDirection: "column", gap: 8 }}>
-                        {shownEvents.map((e) => (
-                          <button
-                            key={e.id}
-                            onClick={() => props.onSelectEventId?.(e.id)}
-                            style={{
-                              ...subRowStyle,
-                              borderColor: e.id === props.selectedEventId ? "rgba(255,255,255,0.35)" : "var(--border)",
-                              background: e.id === props.selectedEventId ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.12)"
-                            }}
-                          >
-                            <div style={{ color: "var(--muted)", fontSize: 12, width: 120, flexShrink: 0 }}>
-                              t{e.tick} • {compactKind(e.kind)}
+                      <div style={{ padding: 10, background: "rgba(0,0,0,0.10)", display: "flex", flexDirection: "column", gap: 10 }}>
+                        <div style={{ color: "var(--muted)", fontSize: 12 }}>Actions</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{renderActionGroups(actionGroups, props.selectedEventId)}</div>
+
+                        {shownUngrouped.length ? (
+                          <div style={{ marginTop: 6 }}>
+                            <div style={{ color: "var(--muted)", fontSize: 12, margin: "6px 0" }}>Other events</div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                              {shownUngrouped.map((e) => (
+                                <button
+                                  key={e.id}
+                                  onClick={() => props.onSelectEventId?.(e.id)}
+                                  style={{
+                                    ...subRowStyle,
+                                    borderColor: e.id === props.selectedEventId ? "rgba(255,255,255,0.35)" : "var(--border)",
+                                    background: e.id === props.selectedEventId ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.12)"
+                                  }}
+                                >
+                                  <div style={{ color: "var(--muted)", fontSize: 12, width: 120, flexShrink: 0 }}>
+                                    t{e.tick} • {compactKind(e.kind)}
+                                  </div>
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ fontSize: 12 }}>{e.message}</div>
+                                    <div style={{ color: "var(--muted)", fontSize: 11 }}>
+                                      {e.siteId ? `@${e.siteId}` : ""} {e.visibility ? `• ${e.visibility}` : ""}
+                                    </div>
+                                  </div>
+                                </button>
+                              ))}
                             </div>
-                            <div style={{ flex: 1 }}>
-                              <div style={{ fontSize: 12 }}>{e.message}</div>
-                              <div style={{ color: "var(--muted)", fontSize: 11 }}>
-                                {e.siteId ? `@${e.siteId}` : ""} {e.visibility ? `• ${e.visibility}` : ""}
-                              </div>
-                            </div>
-                          </button>
-                        ))}
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
