@@ -24,6 +24,21 @@ export function listTargets(selector: TargetSelector, npc: NpcState, world: Worl
       return candidatesAtSite(npc, world, { excludeSelf: selector.excludeSelf }).map((n) => n.id);
     }
     case "cultMemberAtSite": {
+      // Task 13: prioritize a specifically identified cult member if present.
+      const identified = npc.beliefs
+        .filter((b) => b.predicate === "identified_cult_member")
+        .sort((a, b) => b.confidence - a.confidence || b.tick - a.tick);
+      for (const b of identified) {
+        const id = b.subjectId as NpcId;
+        const target = world.npcs[id];
+        if (!target || !target.alive) continue;
+        if (isNpcTraveling(target)) continue;
+        if (target.siteId !== npc.siteId) continue;
+        if (!target.cult.member) continue;
+        if (target.id === npc.id) continue;
+        return [target.id];
+      }
+
       return atSite.filter((n) => n.cult.member).map((n) => n.id);
     }
     case "nonCultMemberAtSite": {

@@ -63,9 +63,19 @@ export function applyFoodProcessHourly(world: WorldState, ctx: ProcessContext): 
       let produced: Partial<Record<FoodType, number>> = {};
       let updated = s;
 
-      const prodGrain = Math.max(0, Math.round(s.productionPerDay.grain * s.fieldsCondition));
-      const prodFish = Math.max(0, Math.round(s.productionPerDay.fish));
-      const prodMeat = Math.max(0, Math.round(s.productionPerDay.meat));
+      const noLaborPenalty = (type: FoodType, amt: number) => {
+        // Task 10: 30% reduction when nobody worked that domain since last dawn.
+        const worked = s.laborWorkedToday?.[type] ?? 0;
+        return worked > 0 ? amt : Math.max(0, Math.round(amt * 0.7));
+      };
+
+      const baseGrain = Math.max(0, Math.round(s.productionPerDay.grain * s.fieldsCondition));
+      const baseFish = Math.max(0, Math.round(s.productionPerDay.fish));
+      const baseMeat = Math.max(0, Math.round(s.productionPerDay.meat));
+
+      const prodGrain = noLaborPenalty("grain", baseGrain);
+      const prodFish = noLaborPenalty("fish", baseFish);
+      const prodMeat = noLaborPenalty("meat", baseMeat);
 
       if (prodGrain > 0) {
         updated = addFoodLot(updated, "grain", prodGrain, day);
@@ -91,9 +101,11 @@ export function applyFoodProcessHourly(world: WorldState, ctx: ProcessContext): 
         visibility: "system",
         siteId,
         message: `Food produced at ${updated.name}`,
-        data: { produced, fieldsCondition: updated.fieldsCondition }
+        data: { produced, fieldsCondition: updated.fieldsCondition, laborWorkedToday: s.laborWorkedToday }
       });
 
+      // Reset labor tracking for the next day window.
+      updated = { ...updated, laborWorkedToday: { grain: 0, fish: 0, meat: 0 } };
       nextWorld = { ...nextWorld, sites: { ...nextWorld.sites, [siteId]: updated } };
     }
 

@@ -1,7 +1,7 @@
 import { makeId } from "../ids";
 import type { Attempt, SimEvent, WorldState } from "../types";
 import type { Rng } from "../rng";
-import { isBusy } from "../busy";
+import { isBusy, markBusy } from "../busy";
 import { resolveArrest, resolveKidnap, resolveTrade } from "./resolvers/control";
 import { resolveAssault, resolveKill, resolveRaid } from "./resolvers/violence";
 import { resolveAnchorSever, resolveForcedEclipse } from "./resolvers/eclipsing";
@@ -37,6 +37,25 @@ export function resolveAndApplyAttempt(
       ],
       keyChanges: []
     };
+  }
+
+  // Idle: throttle NPCs when no meaningful action is selected.
+  // Intentionally emits no events to avoid log spam.
+  if (attempt.kind === "idle") {
+    if (!actor || !actor.alive) return { world, events: [], keyChanges: [] };
+    const hours = Math.max(1, Math.min(6, Math.floor(attempt.durationHours || 1)));
+    const next = {
+      ...world,
+      npcs: {
+        ...world.npcs,
+        [actor.id]: {
+          ...actor,
+          lastAttemptTick: attempt.tick,
+          ...markBusy(actor, world.tick, hours, "idle")
+        }
+      }
+    };
+    return { world: next, events: [], keyChanges: [] };
   }
 
   if (attempt.kind === "travel") return resolveTravel(world, attempt, ctx);

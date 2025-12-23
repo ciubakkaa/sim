@@ -1,8 +1,10 @@
 import type { Attempt, NpcId, NpcState, SimEvent, WorldState } from "./types";
 import { clamp } from "./util";
+import { tickToDay } from "./types";
 
 function bumpForAttemptKind(kind: Attempt["kind"], magnitude: Attempt["intentMagnitude"]): number {
-  const mag = magnitude === "major" ? 1.3 : magnitude === "minor" ? 0.8 : 1;
+  // Task 20: major events grant +50% notability.
+  const mag = magnitude === "major" ? 1.5 : magnitude === "minor" ? 0.8 : 1;
   let base = 0;
   switch (kind) {
     case "kill":
@@ -43,6 +45,12 @@ function bumpForAttemptKind(kind: Attempt["kind"], magnitude: Attempt["intentMag
   return Math.round(base * mag);
 }
 
+function minNotability(n: NpcState): number {
+  // Task 20: leadership roles preserve a minimum notability.
+  if (n.category === "LocalLeader" || n.category === "ElvenLeader" || n.category === "ConcordCellLeaderRitualist") return 40;
+  return 0;
+}
+
 export function applyNotabilityFromEvents(world: WorldState, events: SimEvent[]): WorldState {
   const bumps: Record<NpcId, number> = {};
 
@@ -67,19 +75,39 @@ export function applyNotabilityFromEvents(world: WorldState, events: SimEvent[])
   for (const [id, bump] of Object.entries(bumps)) {
     const n = nextNpcs[id];
     if (!n) continue;
-    nextNpcs[id] = { ...n, notability: clamp(n.notability + bump, 0, 100) };
+    const next = clamp(n.notability + bump, 0, 100);
+    nextNpcs[id] = { ...n, notability: Math.max(next, minNotability(n)) };
   }
 
   return { ...world, npcs: nextNpcs as any };
 }
 
 export function decayNotabilityDaily(world: WorldState): WorldState {
+  const nowDay = tickToDay(world.tick);
   const nextNpcs: Record<string, NpcState> = { ...world.npcs };
   let changed = false;
   for (const n of Object.values(world.npcs)) {
-    const next = n.notability > 0 ? Math.max(0, n.notability - 0.5) : n.notability;
-    if (next !== n.notability) {
-      nextNpcs[n.id] = { ...n, notability: next };
+    const min = minNotability(n);
+
+    // Task 20: preserve notability for 30 days after death.
+    if (!n.alive && n.death) {
+      const ageDays = nowDay - tickToDay(n.death.tick);
+      if (ageDays >= 0 && ageDays < 30) {
+        const keep = Math.max(n.notability, min);
+        if (keep !== n.notability) {
+          nextNpcs[n.id] = { ...n, notability: keep };
+          changed = true;
+        }
+        continue;
+      }
+    }
+
+    // Task 20: slower decay above 50.
+    const decay = n.notability > 50 ? 0.25 : 0.5;
+    const next = n.notability > 0 ? Math.max(0, n.notability - decay) : n.notability;
+    const nextClamped = Math.max(next, min);
+    if (nextClamped !== n.notability) {
+      nextNpcs[n.id] = { ...n, notability: nextClamped };
       changed = true;
     }
   }

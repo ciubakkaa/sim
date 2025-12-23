@@ -73,6 +73,10 @@ export type SettlementSiteState = BaseSiteState & {
   // 0..1
   fieldsCondition: number;
 
+  // Task 10: simple daily labor tracking to connect NPC work to production.
+  // Reset at the daily production boundary (hour 6).
+  laborWorkedToday: Record<FoodType, number>;
+
   // Rumor buffer (bounded). Used for “heard-about” relationship updates.
   rumors: SiteRumor[];
 
@@ -134,6 +138,7 @@ export type TravelState = {
 };
 
 export type AttemptKind =
+  | "idle"
   | "travel"
   | "patrol"
   | "work_farm"
@@ -172,6 +177,7 @@ export type Attempt = {
 export type EventKind =
   | "sim.started"
   | "sim.day.ended"
+  | "npc.died"
   | "travel.encounter"
   | "world.food.produced"
   | "world.food.consumed"

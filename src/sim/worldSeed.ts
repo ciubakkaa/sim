@@ -24,6 +24,7 @@ function settlement(id: SiteId, name: string, culture: "human" | "elven", init: 
     food: emptyFood(),
     productionPerDay: { grain: 0, fish: 0, meat: 0 },
     fieldsCondition: 1,
+    laborWorkedToday: { grain: 0, fish: 0, meat: 0 },
     rumors: [],
     deathsToday: {},
     ...(init as any)

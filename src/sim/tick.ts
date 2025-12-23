@@ -4,12 +4,14 @@ import { Rng } from "./rng";
 import { applyAutomaticProcesses } from "./processes";
 import { makeId } from "./ids";
 import { computeNpcNeeds, selectActiveNpcs } from "./npcs";
-import { generateReflexAttempt, resolveAndApplyAttempt } from "./attempts";
+import { generateScoredAttempt, resolveAndApplyAttempt } from "./attempts";
 import { progressTravelHourly, isNpcTraveling } from "./movement";
 import { progressDetentionHourly, progressEclipsingHourly } from "./eclipsing";
 import { decayBeliefsDaily } from "./beliefs";
 import { applyNotabilityFromEvents, decayNotabilityDaily } from "./notability";
 import { updateStates } from "./states/engine";
+import { clamp } from "./util";
+import { applyBeliefsFromEvents } from "./beliefs/creation";
 
 export type TickOptions = {
   attempts?: Attempt[];
@@ -55,40 +57,105 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
   events.push(...eclipsing.events);
   keyChanges.push(...eclipsing.keyChanges);
 
-  // Phase 4: update NPC needs, select active NPCs, generate reflex attempts.
+  // Phase 4: update NPC needs, select active NPCs, generate scoring-based attempts.
   let withNeeds = eclipsing.world;
   {
     const nextNpcs = { ...withNeeds.npcs };
     for (const npc of Object.values(withNeeds.npcs)) {
       // Small trauma decay each hour (details fade, emotion fades slowly).
       const trauma = npc.alive ? Math.max(0, npc.trauma - 0.2) : npc.trauma;
-      nextNpcs[npc.id] = { ...npc, trauma, needs: computeNpcNeeds({ ...npc, trauma }, withNeeds) };
+
+      // Home tracking (Task 8):
+      // - set awayFromHomeSinceTick when first leaving home
+      // - clear it upon returning home
+      // - after 7 days away, treat current site as new home and reset belonging pressure
+      let homeSiteId = npc.homeSiteId;
+      let awayFromHomeSinceTick = npc.awayFromHomeSinceTick;
+      const isAway = npc.siteId !== npc.homeSiteId;
+      if (npc.alive && isAway) {
+        if (awayFromHomeSinceTick === undefined) awayFromHomeSinceTick = withNeeds.tick;
+        const hoursAway = withNeeds.tick - awayFromHomeSinceTick;
+        if (hoursAway >= 24 * 7) {
+          homeSiteId = npc.siteId;
+          awayFromHomeSinceTick = undefined;
+        }
+      } else {
+        awayFromHomeSinceTick = undefined;
+      }
+
+      // Task 11: named NPC starvation based on sustained site hunger.
+      const site = withNeeds.sites[npc.siteId] as any;
+      const isHungry =
+        npc.alive &&
+        site?.kind === "settlement" &&
+        !isNpcTraveling(npc) &&
+        typeof site.hunger === "number" &&
+        site.hunger >= 60;
+
+      const consecutiveHungerHours = isHungry ? (npc.consecutiveHungerHours ?? 0) + 1 : 0;
+
+      const elderProxy =
+        npc.category === "LocalLeader" ||
+        npc.category === "ContinuumScholar" ||
+        npc.category === "ElvenLeader" ||
+        npc.category === "ConcordCellLeaderRitualist";
+      const childProxy = npc.category === "TaintedThrall"; // weakest proxy bucket for now
+      const hungerDamageMult = elderProxy ? 1.5 : childProxy ? 1.25 : 1.0;
+
+      let hp = npc.hp;
+      let alive = npc.alive;
+      let death = npc.death;
+
+      if (npc.alive && consecutiveHungerHours >= 48 && site?.kind === "settlement") {
+        const dmg = Math.round(5 * hungerDamageMult);
+        hp = clamp(hp - dmg, 0, npc.maxHp);
+        if (hp <= 0) {
+          alive = false;
+          death = { tick: withNeeds.tick, cause: "starvation", atSiteId: npc.siteId };
+          events.push({
+            id: makeId("evt", withNeeds.tick, nextEventSeq()),
+            tick: withNeeds.tick,
+            kind: "npc.died",
+            visibility: "system",
+            siteId: npc.siteId,
+            message: `${npc.name} died of starvation at ${site.name}`,
+            data: { npcId: npc.id, cause: "starvation", atSiteId: npc.siteId }
+          });
+          keyChanges.push(`${npc.name} died of starvation at ${site.name}`);
+        }
+      }
+
+      const updated = { ...npc, trauma, homeSiteId, awayFromHomeSinceTick, consecutiveHungerHours, hp, alive, death };
+      nextNpcs[npc.id] = { ...updated, needs: computeNpcNeeds(updated, withNeeds) };
     }
     withNeeds = { ...withNeeds, npcs: nextNpcs };
   }
 
-  // Include externally supplied attempts (e.g. future player/adapter), plus reflex attempts.
-  const reflexAttempts: Attempt[] = [];
+  // Include externally supplied attempts (e.g. future player/adapter), plus AI attempts.
+  const aiAttempts: Attempt[] = [];
   {
     const active = selectActiveNpcs(withNeeds, rng);
     const activeIds = Array.from(active.activeNpcIds).sort();
     for (const npcId of activeIds) {
       const npc = withNeeds.npcs[npcId];
       if (!npc) continue;
-      const a = generateReflexAttempt(npc, withNeeds, rng);
-      if (a) reflexAttempts.push(a);
+      const a = generateScoredAttempt(npc, withNeeds, rng);
+      if (a) aiAttempts.push(a);
     }
   }
 
   let afterAttempts = withNeeds;
-  // Resolve supplied attempts first (stable), then reflex attempts.
-  const allAttempts = [...(opts.attempts ?? []), ...reflexAttempts];
+  // Resolve supplied attempts first (stable), then AI attempts.
+  const allAttempts = [...(opts.attempts ?? []), ...aiAttempts];
   for (const a of allAttempts) {
     const res = resolveAndApplyAttempt(afterAttempts, a, { rng, nextEventSeq });
     afterAttempts = res.world;
     events.push(...res.events);
     keyChanges.push(...res.keyChanges);
   }
+
+  // Task 13: create beliefs from observed events/attempts before reactive state updates.
+  afterAttempts = applyBeliefsFromEvents(afterAttempts, events);
 
   // Reactive state updates (v2 AI system): triggers from this tick's events and world diffs.
   afterAttempts = updateStates(afterAttempts, withNeeds, events);

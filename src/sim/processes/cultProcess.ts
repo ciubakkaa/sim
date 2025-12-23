@@ -100,7 +100,14 @@ export function applyCultDaily(world: WorldState, ctx: ProcessContext): ProcessR
     // Derive site influence from membership, with small smoothing so it doesn't jitter.
     const nextMemberCount = Object.values(nextWorld.npcs).filter((n) => n.alive && n.siteId === siteId && n.cult.member).length;
     const derived = aliveCount > 0 ? clamp(Math.round((nextMemberCount / aliveCount) * 100), 0, 100) : 0;
-    const smoothed = clamp(Math.round(site.cultInfluence * 0.7 + derived * 0.3), 0, 100);
+    const proposed = clamp(Math.round(site.cultInfluence * 0.7 + derived * 0.3), 0, 100);
+
+    // Task 9 saturation: slow drift when influence is already very high.
+    // ("0.5x drift when influence > 80")
+    const smoothed =
+      site.cultInfluence > 80
+        ? clamp(Math.round(site.cultInfluence + (proposed - site.cultInfluence) * 0.5), 0, 100)
+        : proposed;
 
     const updated: SettlementSiteState = { ...site, cultInfluence: smoothed };
     nextWorld = { ...nextWorld, sites: { ...nextWorld.sites, [siteId]: updated } };

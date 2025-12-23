@@ -85,6 +85,10 @@ export function scoreActions(
       const other = world.npcs[target];
       if (other) {
         const rel = getRelationship(npc, other, world);
+
+        // Task 13: block trade when trust is very low.
+        if (def.kind === "trade" && rel.trust < 20) continue;
+
         for (const rw of def.relationshipWeights) {
           const v = rel[rw.field] ?? 0;
           if (rw.op === ">" && v > rw.threshold) score += rw.weight;
@@ -104,6 +108,9 @@ export function scoreActions(
       if (mod.requiresTarget && !target) continue;
       score += mod.weightDelta;
     }
+
+    // Task 15: flee bonus when low HP.
+    if (def.kind === "travel" && npc.hp < 20) score += 50;
 
     if (score > 0) results.push({ definition: def, score, target });
   }

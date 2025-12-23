@@ -84,6 +84,8 @@ function printHelp() {
       "  npcs --days <n> --seed <n> --site <siteId> [--limit <n>]",
       "  npc --days <n> --seed <n> --id <npcId>",
       "      (npc/npcs now display travel/detention/eclipsing/busy/hp/beliefs)",
+      "  viewer --seed <n> [--port <n>] [--ms-per-tick <n>] [--play]",
+      "      (starts an SSE sim-service on /events and control on POST /control)",
       "  summarize-log --file <path> [--sample-days <csv>] [--show-sites <csv>]",
       "  npc-history --id <npcId> [--file <path>] [--limit <n>]  (defaults to latest logs/events-*.jsonl)",
       "  story <days>  (seed=1, saves all events JSONL, then prints summary)",
@@ -98,6 +100,7 @@ function printHelp() {
       "  node dist/cli.js run --days 10 --seed 42 --events --events-kind attempt.recorded",
       "  node dist/cli.js run --days 10 --seed 42 --save-events",
       "  node dist/cli.js run --days 10 --seed 42 --events-kind attempt.recorded --save-events",
+      "  node dist/cli.js viewer --seed 1 --port 8787 --ms-per-tick 60000 --play",
       "  node dist/cli.js npcs --days 0 --seed 1 --site HumanCityPort --limit 20",
       "  node dist/cli.js npc --days 3 --seed 1 --id npc:25",
       "  node dist/cli.js summarize-log --file logs/events-20251214-223440Z-seed1-days180.jsonl",
@@ -404,6 +407,7 @@ async function main() {
     cmd !== "run" &&
     cmd !== "npcs" &&
     cmd !== "npc" &&
+    cmd !== "viewer" &&
     cmd !== "summarize-log" &&
     cmd !== "npc-history" &&
     cmd !== "story"
@@ -411,6 +415,27 @@ async function main() {
     console.error(`Unknown command: ${cmd}`);
     printHelp();
     process.exitCode = 1;
+    return;
+  }
+
+  if (cmd === "viewer") {
+    const { SimRuntime } = await import("./service/runtime");
+    const { startViewerServer } = await import("./service/server");
+
+    const seed = numFlag(flags, "seed", 1);
+    const port = numFlag(flags, "port", 8787);
+    const msPerTick = numFlag(flags, "ms-per-tick", 60_000);
+    const play = Boolean(flags.play);
+
+    const runtime = new SimRuntime({ seed, msPerTick, paused: !play });
+    startViewerServer({ port, runtime });
+
+    console.log(`Viewer sim-service running on http://localhost:${port}`);
+    console.log(`- SSE stream: GET  /events`);
+    console.log(`- Controls:   POST /control (JSON)`);
+    console.log("");
+    console.log(`seed=${seed} msPerTick=${msPerTick} paused=${!play}`);
+
     return;
   }
 

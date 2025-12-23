@@ -73,6 +73,12 @@ export function computeNpcNeeds(npc: NpcState, world: WorldState): Record<NeedKe
     needs.Health = clamp(Math.round(10 + npc.trauma * 0.2), 0, 100);
     needs.Duty = clamp(dutyBaseline(npc.category), 0, 100);
     needs.Meaning = clamp(Math.round(npc.trauma * 0.4), 0, 100);
+
+    // Belonging rises when away from home for extended periods.
+    if (npc.awayFromHomeSinceTick !== undefined) {
+      const hoursAway = world.tick - npc.awayFromHomeSinceTick;
+      if (hoursAway > 48) needs.Belonging = clamp(Math.round((hoursAway - 48) / 2), 0, 100);
+    }
     return needs;
   }
 
@@ -106,10 +112,40 @@ export function computeNpcNeeds(npc: NpcState, world: WorldState): Record<NeedKe
   // Role-driven duty
   needs.Duty = clamp(dutyBaseline(npc.category), 0, 100);
 
+  // Task 18: presence of a local faction leader increases Duty pressure.
+  if (isSettlement(site)) {
+    const leaderPresent = Object.values(world.npcs).some(
+      (n) =>
+        n.alive &&
+        !isNpcTraveling(n) &&
+        n.siteId === npc.siteId &&
+        (n.category === "LocalLeader" || n.category === "ElvenLeader" || n.category === "ConcordCellLeaderRitualist")
+    );
+    if (leaderPresent) needs.Duty = clamp(needs.Duty + 10, 0, 100);
+  }
+
   // Trait modulation
   needs.Safety = clamp(needs.Safety + (npc.traits.Fear - 50) * 0.15, 0, 100);
   needs.Food = clamp(needs.Food + (npc.traits.Discipline < 40 ? 5 : 0), 0, 100);
   needs.Meaning = clamp(needs.Meaning + npc.trauma * 0.4, 0, 100);
+
+  // Task 13: holding strong violence/crime beliefs increases Safety pressure.
+  if (
+    npc.beliefs.some(
+      (b) =>
+        b.predicate === "witnessed_crime" &&
+        (b.object === "kill" || b.object === "raid" || b.object === "kidnap" || b.object === "assault") &&
+        b.confidence >= 60
+    )
+  ) {
+    needs.Safety = clamp(needs.Safety + 15, 0, 100);
+  }
+
+  // Belonging (Task 8): increases when away from home for >48h.
+  if (npc.awayFromHomeSinceTick !== undefined && npc.siteId !== npc.homeSiteId) {
+    const hoursAway = world.tick - npc.awayFromHomeSinceTick;
+    if (hoursAway > 48) needs.Belonging = clamp(Math.round((hoursAway - 48) / 2), 0, 100);
+  }
 
   return needs;
 }
@@ -191,8 +227,15 @@ export function pickTravelDestination(world: WorldState, from: SiteId, rng: Rng)
   const neighbors = getNeighbors(world.map, from);
   if (!neighbors.length) return undefined;
 
+  // Task 16: prevent traveling to hidden hideouts until discovered.
+  const visible = neighbors.filter((n) => {
+    const s: any = world.sites[n.to];
+    return !(s?.kind === "hideout" && s.hidden);
+  });
+  if (!visible.length) return undefined;
+
   // Prefer lower unrest/pressure in settlements; otherwise random.
-  const scored = neighbors.map((n) => {
+  const scored = visible.map((n) => {
     const s = world.sites[n.to];
     let danger = s.eclipsingPressure;
     if ((s as any).kind === "settlement") danger += (s as SettlementSiteState).unrest;

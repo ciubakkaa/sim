@@ -5,6 +5,8 @@ import { clamp } from "../util";
 import type { SettlementSiteState, SimEvent, WorldState } from "../types";
 import { tickToDay, tickToHourOfDay } from "../types";
 import type { ProcessContext, ProcessResult } from "./types";
+import { defaultTraits, emptyNeeds } from "../npcs";
+import { baselineRelationship } from "../relationships";
 
 function isSettlement(site: unknown): site is SettlementSiteState {
   return Boolean(site && (site as SettlementSiteState).kind === "settlement");
@@ -93,6 +95,98 @@ export function applyPopulationProcessDaily(world: WorldState, ctx: ProcessConte
         message: `${refugees} refugees arrived at ${updated.name}`,
         data: { refugees, addedAdults, addedChildren }
       });
+    }
+  }
+
+  // Task 17: Refugee named NPC generation (daily, only for under-populated settlements).
+  {
+    const totalWorldPop = settlements.reduce((a, s) => a + s.cohorts.children + s.cohorts.adults + s.cohorts.elders, 0);
+    const lowWorldPopMult = totalWorldPop < 200 ? 2 : 1;
+
+    const nameFirst = ["Alden", "Mara", "Jon", "Tessa", "Bran", "Lysa", "Edrin", "Sera", "Dane", "Rook", "Fenn", "Kara"];
+    const nameLast = ["Ashford", "Evershore", "Briar", "Stone", "Wells", "Hearth", "North", "Crowe", "Reed", "Hale"];
+    const makeName = () => `${nameFirst[ctx.rng.int(0, nameFirst.length - 1)]} ${nameLast[ctx.rng.int(0, nameLast.length - 1)]}`;
+
+    const eligible = settlements.filter((s) => {
+      const pop = s.cohorts.children + s.cohorts.adults + s.cohorts.elders;
+      return s.housingCapacity > 0 && pop < 0.5 * s.housingCapacity;
+    });
+
+    for (const dest of eligible) {
+      const pop = dest.cohorts.children + dest.cohorts.adults + dest.cohorts.elders;
+      const slackRatio = clamp((0.5 * dest.housingCapacity - pop) / Math.max(1, 0.5 * dest.housingCapacity), 0, 1);
+      const chance = clamp(0.08 * lowWorldPopMult * (0.5 + slackRatio * 0.5), 0, 0.35);
+      if (!ctx.rng.chance(chance)) continue;
+
+      const count = ctx.rng.int(1, 3);
+      const createdIds: string[] = [];
+
+      for (let i = 0; i < count; i++) {
+        const pick = ctx.rng.next();
+        const category = pick < 0.5 ? "Farmer" : pick < 0.75 ? "Fisher" : "Craftsperson";
+
+        const id = makeId("npc", nextWorld.tick, ctx.nextEventSeq());
+        const traits = defaultTraits(ctx.rng);
+        traits.Fear = clamp(70 + ctx.rng.int(0, 20), 0, 100);
+        traits.Suspicion = clamp(traits.Suspicion + 15, 0, 100);
+
+        const npc: any = {
+          id,
+          name: makeName(),
+          category,
+          siteId: dest.id,
+          homeSiteId: dest.id,
+          awayFromHomeSinceTick: undefined,
+          familyIds: [],
+          activeStates: [],
+          goals: [],
+          proficiency: {},
+          recentActions: [],
+          consecutiveHungerHours: 0,
+          stateTriggerMemory: {},
+          alive: true,
+          cult: { member: false, role: "none" },
+          trauma: clamp(10 + ctx.rng.int(0, 15), 0, 100),
+          hp: 100,
+          maxHp: 100,
+          traits,
+          values: [],
+          needs: emptyNeeds(),
+          notability: 10,
+          lastAttemptTick: -999,
+          forcedActiveUntilTick: 0,
+          busyUntilTick: 0,
+          beliefs: [],
+          relationships: {}
+        };
+
+        // Reduced trust: seed low-trust relationships to locals at the destination.
+        const locals = Object.values(nextWorld.npcs).filter((n) => n.alive && n.siteId === dest.id);
+        for (const other of locals) {
+          const base = baselineRelationship(npc, other as any, nextWorld);
+          npc.relationships[other.id] = {
+            trust: clamp(base.trust - 15, 0, 100),
+            fear: clamp(base.fear + 10, 0, 100),
+            loyalty: clamp(base.loyalty - 5, 0, 100)
+          };
+        }
+
+        nextWorld = { ...nextWorld, npcs: { ...nextWorld.npcs, [id]: npc } };
+        createdIds.push(id);
+      }
+
+      if (createdIds.length) {
+        keyChanges.push(`${dest.name} received ${createdIds.length} named refugees`);
+        events.push({
+          id: makeId("evt", nextWorld.tick, ctx.nextEventSeq()),
+          tick: nextWorld.tick,
+          kind: "world.refugees.arrived",
+          visibility: "system",
+          siteId: dest.id,
+          message: `${createdIds.length} named refugees arrived at ${dest.name}`,
+          data: { namedNpcs: createdIds, chance, worldPop: totalWorldPop }
+        });
+      }
     }
   }
 

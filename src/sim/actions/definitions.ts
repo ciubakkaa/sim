@@ -66,7 +66,9 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
       { type: "atSiteKind", kinds: ["settlement"] },
       { type: "hasCategory", categories: ["MerchantSmuggler", "Craftsperson"] },
       { type: "notBusy" },
-      { type: "notTraveling" }
+      { type: "notTraveling" },
+      // Task 13: block trade when trust < 20 by requiring a viable trade partner at the site.
+      { type: "hasTarget", selector: { type: "anyNpcAtSite", excludeSelf: true } }
     ],
     baseWeight: 30,
     needWeights: { Wealth: 0.4, Status: 0.2 },
@@ -79,7 +81,8 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
     relationshipWeights: [{ field: "trust", op: ">", threshold: 50, weight: 10 }],
     durationHours: 2,
     visibility: "public",
-    magnitude: "normal"
+    magnitude: "normal",
+    targetSelector: { type: "anyNpcAtSite", excludeSelf: true }
   },
   {
     kind: "steal",
@@ -292,8 +295,8 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
       { type: "notTraveling" },
       { type: "notDetained" },
       { type: "hasTarget", selector: { type: "nonCultMemberAtSite" } },
-      { type: "siteCondition", field: "eclipsingPressure", op: ">=", value: 50 },
-      { type: "siteCondition", field: "anchoringStrength", op: "<=", value: 50 }
+      { type: "siteCondition", field: "eclipsingPressure", op: ">", value: 35 },
+      { type: "siteCondition", field: "anchoringStrength", op: "<", value: 60 }
     ],
     baseWeight: 10,
     needWeights: { Meaning: 0.4 },

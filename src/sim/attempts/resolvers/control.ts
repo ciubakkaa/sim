@@ -1,9 +1,11 @@
-import type { Attempt, NpcState, SettlementSiteState, WorldState } from "../../types";
+import type { Attempt, FoodType, NpcState, SettlementSiteState, WorldState } from "../../types";
 import { clamp } from "../../util";
 import type { ResolveCtx, ResolveResult } from "./helpers";
 import { makeHelpers } from "./helpers";
 import { isSettlement } from "../rumors";
 import { markBusy } from "../../busy";
+import { totalFood, addFoodLot } from "../../food";
+import { tickToDay } from "../../types";
 
 function getTarget(world: WorldState, attempt: Attempt): NpcState | undefined {
   if (!attempt.targetId) return undefined;
@@ -17,6 +19,64 @@ export function resolveTrade(world: WorldState, attempt: Attempt, ctx: ResolveCt
 
   const actor = h.world.npcs[attempt.actorId];
   if (!actor || !actor.alive) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+
+  // Task 19: basic inter-settlement food trade (surplus -> deficit).
+  const settlements = h.world.map.sites.map((id) => h.world.sites[id]).filter(isSettlement);
+  const day = tickToDay(h.world.tick);
+
+  const popTotal = (s: SettlementSiteState) => s.cohorts.children + s.cohorts.adults + s.cohorts.elders;
+  const dailyNeed = (s: SettlementSiteState) => popTotal(s) * 1; // FOOD_PER_CAPITA_PER_DAY=1
+  const daysStored = (s: SettlementSiteState) => {
+    const need = Math.max(1, dailyNeed(s));
+    const totals = totalFood(s.food);
+    const stored = totals.grain + totals.fish + totals.meat;
+    return stored / need;
+  };
+
+  const scored = settlements
+    .map((s) => ({ s, days: daysStored(s) }))
+    .sort((a, b) => b.days - a.days || a.s.id.localeCompare(b.s.id));
+  const exporters = scored.filter((x) => x.days > 7);
+  const importers = scored.slice().sort((a, b) => a.days - b.days || a.s.id.localeCompare(b.s.id)).filter((x) => x.days < 3);
+
+  const exporter = exporters[0]?.s;
+  const importer = importers[0]?.s;
+
+  const disrupted =
+    Boolean(exporter && Object.values(h.world.npcs).some((n) => n.alive && n.siteId === exporter.id && n.category === "BanditRaider")) ||
+    Boolean(importer && Object.values(h.world.npcs).some((n) => n.alive && n.siteId === importer.id && n.category === "BanditRaider"));
+
+  const successChance = clamp(80 - (disrupted ? 20 : 0), 0, 100);
+  const roll = ctx.rng.int(0, 99);
+  const success = roll < successChance;
+
+  let transfer: { from: string; to: string; type: FoodType; amount: number; delivered: number; loss: number } | undefined;
+  if (success && exporter && importer && exporter.id !== importer.id) {
+    const expTotals = totalFood(exporter.food);
+    const expStored = expTotals.grain + expTotals.fish + expTotals.meat;
+    const impTotals = totalFood(importer.food);
+    const impStored = impTotals.grain + impTotals.fish + impTotals.meat;
+
+    const expSurplus = Math.max(0, Math.floor(expStored - 7 * dailyNeed(exporter)));
+    const impDeficit = Math.max(0, Math.ceil(3 * dailyNeed(importer) - impStored));
+    const amount = clamp(Math.min(expSurplus, impDeficit, 60), 0, 60);
+
+    if (amount > 0) {
+      const types: FoodType[] = ["grain", "fish", "meat"];
+      types.sort((a, b) => (expTotals[b] ?? 0) - (expTotals[a] ?? 0) || a.localeCompare(b));
+      const type = types[0]!;
+
+      const delivered = Math.max(0, Math.floor(amount * 0.9)); // Task 19: 10% loss
+      const loss = amount - delivered;
+
+      h.apply({ kind: "site.food.take", siteId: exporter.id, foodType: type, amount, takeFrom: "newest" });
+
+      const impNext = addFoodLot(importer, type, delivered, day);
+      h.apply({ kind: "site.patch", siteId: importer.id, patch: { food: impNext.food } as any });
+
+      transfer = { from: exporter.id, to: importer.id, type, amount, delivered, loss };
+    }
+  }
 
   const deltaMorale = ctx.rng.int(0, 2);
   const deltaUnrest = ctx.rng.int(0, 1) ? -1 : 0;
@@ -33,7 +93,7 @@ export function resolveTrade(world: WorldState, attempt: Attempt, ctx: ResolveCt
     npcId: actor.id,
     patch: { lastAttemptTick: attempt.tick, ...markBusy(actor, h.world.tick, attempt.durationHours, "trade") }
   });
-  h.emit(`${actor.name} traded in ${site.name}`, { deltaMorale, deltaUnrest });
+  h.emit(`${actor.name} traded in ${site.name}`, { deltaMorale, deltaUnrest, success, roll, successChance, disrupted, transfer });
   if (attempt.visibility === "public") h.addPublicRumor(`${actor.name} traded`, 50);
 
   return { world: h.world, events: h.events, keyChanges: h.keyChanges };
@@ -99,7 +159,14 @@ export function resolveKidnap(world: WorldState, attempt: Attempt, ctx: ResolveC
 
   const score = actor.traits.Aggression * 0.45 + actor.traits.Discipline * 0.35 + (100 - actor.traits.Empathy) * 0.2;
   const resist = target.traits.Courage * 0.55 + target.traits.Discipline * 0.25 + target.traits.Suspicion * 0.2;
-  const chance = clamp(score - resist + 45, 5, 85);
+  // Task 12: raise baseline kidnap success chance (15% -> 25% equivalent bump).
+  const baseChance = clamp(score - resist + 55, 5, 85);
+
+  // Task 18: coordination bonus for kidnapping (multiple cult members present).
+  const cultHere = Object.values(h.world.npcs).filter((n) => n.alive && n.siteId === attempt.siteId && n.cult.member);
+  const extraCult = Math.max(0, cultHere.length - 1); // exclude actor
+  const coordBonus = Math.min(30, extraCult * 10);
+  const chance = clamp(baseChance + coordBonus, 5, 95);
   const roll = ctx.rng.int(0, 99);
   const success = roll < chance;
 
@@ -126,7 +193,7 @@ export function resolveKidnap(world: WorldState, attempt: Attempt, ctx: ResolveC
       npcId: target.id,
       patch: { trauma: clamp(target.trauma + 4, 0, 100), forcedActiveUntilTick: h.world.tick + 24 }
     });
-    h.emit(`${actor.name} attempted a kidnapping`, { success: false, roll, chance, targetId: target.id });
+    h.emit(`${actor.name} attempted a kidnapping`, { success: false, roll, chance, baseChance, coordBonus, extraCult, targetId: target.id });
     if (attempt.visibility === "public") h.addPublicRumor(`${actor.name} attempted to kidnap ${target.name}`, 70);
     return { world: h.world, events: h.events, keyChanges: h.keyChanges };
   }
@@ -159,7 +226,7 @@ export function resolveKidnap(world: WorldState, attempt: Attempt, ctx: ResolveC
     } as Partial<NpcState>
   });
 
-  h.emit(`${actor.name} kidnapped ${target.name}`, { success: true, roll, chance, detentionHours, targetId: target.id });
+  h.emit(`${actor.name} kidnapped ${target.name}`, { success: true, roll, chance, baseChance, coordBonus, extraCult, detentionHours, targetId: target.id });
   if (attempt.visibility === "public") h.addPublicRumor(`${actor.name} kidnapped ${target.name}`, 85);
 
   return { world: h.world, events: h.events, keyChanges: h.keyChanges };
