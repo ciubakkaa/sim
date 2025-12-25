@@ -4,6 +4,8 @@ import path from "node:path";
 import readline from "node:readline";
 import { createWorld } from "./sim/worldSeed";
 import { ensurePersistedRunDir, writeRunMeta, writeRunSnapshot } from "./service/persist";
+import { computeDeterministicLayout } from "./service/layout";
+import { createConfig, setConfig } from "./sim/config";
 
 function parseArgs(argv: string[]) {
   const args = argv.slice(2);
@@ -65,6 +67,8 @@ function defaultWorldsBaseDir(): string {
   return path.join("logs", "worlds");
 }
 
+// v2-only: feature flags removed. Keep CLI surface area clean by removing obsolete v2 flags.
+
 function writeEventsJsonl(outPath: string, events: unknown[]): Promise<void> {
   const dir = path.dirname(outPath);
   fs.mkdirSync(dir, { recursive: true });
@@ -101,6 +105,18 @@ function printHelp() {
       "  npc-history --id <npcId> [--file <path>] [--limit <n>]  (defaults to latest logs/events-*.jsonl)",
       "  story <days>  (seed=1, saves all events JSONL, then prints summary)",
       "",
+      "Debug Commands (v2):",
+      "  debug-entity --id <entityId> --file <path> [--limit <n>]",
+      "      Show entity's memories, goals, plans, relationships from log",
+      "  debug-narrative --file <path> [--id <narrativeId>]",
+      "      Show narratives, chronicle entries, story beats from log",
+      "  debug-operations --file <path> [--faction <factionId>]",
+      "      Show faction operations and decisions from log",
+      "  debug-scenario --scenario <heal_debt|investigate_knowledge|kidnap_chronicle|planning_inventory_steal> [--seed <n>] [--site <siteId>]",
+      "      Run a deterministic v2 smoke scenario and print a compact summary",
+      "  validate-world --file <path>",
+      "      Validate a world snapshot for consistency",
+      "",
       "Notes:",
       "  - You can pass different params via npm scripts using: npm run <script> -- --days 90 --seed 2",
       "  - --save-events writes JSONL to ./logs/ by default (timestamped filename).",
@@ -116,11 +132,19 @@ function printHelp() {
       "  node dist/cli.js viewer --seed 1 --port 8787 --ms-per-tick 60000 --play",
       "  node dist/cli.js viewer --seed 1 --port 8787 --ms-per-tick 60000 --play --save-events",
       "  node dist/cli.js viewer --seed 1 --port 8787 --ms-per-tick 60000 --play --persist-run",
+      "  node dist/cli.js viewer --seed 1 --play",
       "  node dist/cli.js npcs --days 0 --seed 1 --site HumanCityPort --limit 20",
       "  node dist/cli.js npc --days 3 --seed 1 --id npc:25",
       "  node dist/cli.js summarize-log --file logs/events-20251214-223440Z-seed1-days180.jsonl",
       "  node dist/cli.js npc-history --file logs/events-20251214-224225Z-seed1-days30.jsonl --id npc:25 --limit 50",
-      "  node dist/cli.js story 180"
+      "  node dist/cli.js story 180",
+      "",
+      "Debug Examples:",
+      "  node dist/cli.js debug-entity --id npc:25  (auto-picks latest logs/events-*.jsonl)",
+      "  node dist/cli.js debug-narrative  (auto-picks latest logs/events-*.jsonl)",
+      "  node dist/cli.js debug-operations --faction cult  (auto-picks latest logs/events-*.jsonl)",
+      "  node dist/cli.js debug-scenario --scenario heal_debt",
+      "  node dist/cli.js validate-world --file logs/worlds/seed-1/snapshot.json"
     ].join("\n")
   );
 }
@@ -418,18 +442,124 @@ async function main() {
     return;
   }
 
-  if (
-    cmd !== "run" &&
-    cmd !== "npcs" &&
-    cmd !== "npc" &&
-    cmd !== "viewer" &&
-    cmd !== "summarize-log" &&
-    cmd !== "npc-history" &&
-    cmd !== "story"
-  ) {
+  const validCommands = [
+    "run", "npcs", "npc", "viewer", "summarize-log", "npc-history", "story",
+    "debug-entity", "debug-narrative", "debug-operations", "debug-scenario", "validate-world"
+  ];
+  
+  if (!validCommands.includes(cmd)) {
     console.error(`Unknown command: ${cmd}`);
     printHelp();
     process.exitCode = 1;
+    return;
+  }
+
+  // Handle debug commands
+  if (cmd === "debug-entity") {
+    const { debugEntity } = await import("./cli/debug");
+    const file = strFlag(flags, "file") ?? pickLatestEventsLog();
+    const id = strFlag(flags, "id");
+    if (!file) {
+      console.error("Missing required flag: --file <path> (and no logs/events-*.jsonl found)");
+      process.exitCode = 1;
+      return;
+    }
+    if (!id) {
+      console.error("Missing required flag: --id <entityId>");
+      process.exitCode = 1;
+      return;
+    }
+    const limit = numFlag(flags, "limit", 50);
+    await debugEntity(file, id, { limit });
+    return;
+  }
+
+  if (cmd === "debug-narrative") {
+    const { debugNarrative } = await import("./cli/debug");
+    const file = strFlag(flags, "file") ?? pickLatestEventsLog();
+    if (!file) {
+      console.error("Missing required flag: --file <path> (and no logs/events-*.jsonl found)");
+      process.exitCode = 1;
+      return;
+    }
+    const narrativeId = strFlag(flags, "id");
+    await debugNarrative(file, narrativeId);
+    return;
+  }
+
+  if (cmd === "debug-operations") {
+    const { debugOperations } = await import("./cli/debug");
+    const file = strFlag(flags, "file") ?? pickLatestEventsLog();
+    if (!file) {
+      console.error("Missing required flag: --file <path> (and no logs/events-*.jsonl found)");
+      process.exitCode = 1;
+      return;
+    }
+    const factionId = strFlag(flags, "faction");
+    await debugOperations(file, factionId);
+    return;
+  }
+
+  if (cmd === "debug-scenario") {
+    const { runV2SmokeScenario } = await import("./sim/scenarios/v2Smoke");
+    const scenario = strFlag(flags, "scenario") as any;
+    if (!scenario) {
+      console.error("Missing required flag: --scenario <heal_debt|investigate_knowledge|kidnap_chronicle|planning_inventory_steal>");
+      process.exitCode = 1;
+      return;
+    }
+    const seed = numFlag(flags, "seed", 9101);
+    const siteId = strFlag(flags, "site");
+    const res: any = runV2SmokeScenario(scenario, { seed, siteId });
+
+    console.log(`\n=== debug-scenario: ${String(res.scenario)} ===`);
+    console.log(`seed=${res.seed} site=${res.siteId}`);
+
+    if (res.scenario === "heal_debt") {
+      const target = res.world.npcs[res.targetId];
+      const debts = target?.debts ?? [];
+      const favor = debts.find((d: any) => d.debtKind === "favor_granted" && d.otherNpcId === res.healerId);
+      console.log(`healer=${res.healerId} target=${res.targetId}`);
+      console.log(`target.debts=${debts.length} favorDebt=${favor ? "yes" : "no"}`);
+    }
+
+    if (res.scenario === "investigate_knowledge") {
+      const guard = res.world.npcs[res.guardId];
+      const facts = guard?.knowledge?.facts ?? [];
+      const found = facts.some((f: any) => f.kind === "identified_cult_member" && f.subjectId === res.cultId);
+      console.log(`guard=${res.guardId} cult=${res.cultId} iterations=${res.iterations}`);
+      console.log(`guard.facts=${facts.length} foundIdentifiedCultMember=${found ? "yes" : "no"}`);
+    }
+
+    if (res.scenario === "kidnap_chronicle") {
+      const entries: any[] = res.world.chronicle?.entries ?? [];
+      const got = entries.some((e: any) => e.kind === "kidnap" && e.primaryNpcId === res.actorId);
+      console.log(`actor=${res.actorId} target=${res.targetId} attempts=${res.attempts}`);
+      console.log(`chronicle.entries=${entries.length} kidnapEntry=${got ? "yes" : "no"}`);
+    }
+
+    if (res.scenario === "planning_inventory_steal") {
+      const npc = res.world.npcs[res.npcId];
+      const food = npc?.inventory?.food ?? {};
+      const totalFood = Object.values(food).reduce((a: number, v: any) => a + Number(v ?? 0), 0);
+      console.log(`npc=${res.npcId} ticks=${res.ticks} foodGained=${res.foodGained}`);
+      console.log(`npc.foodTotal=${totalFood} plan=${npc?.plan ? "active" : "none"}`);
+    }
+
+    console.log(`eventsEmitted=${Array.isArray(res.events) ? res.events.length : 0}`);
+    console.log("");
+    return;
+  }
+
+  if (cmd === "validate-world") {
+    const { validateWorld } = await import("./cli/debug");
+    const file = strFlag(flags, "file");
+    if (!file) {
+      console.error("Missing required flag: --file <path>");
+      process.exitCode = 1;
+      return;
+    }
+    await validateWorld(file);
     return;
   }
 
@@ -561,7 +691,15 @@ async function main() {
     const nowIso = new Date().toISOString();
     writeRunMeta(p, { version: 1, seed, runId: p.runId, startedAt: nowIso, argv: process.argv, note: `story days=${days}` });
     // For story runs, snapshot the final world so the viewer matches the end-state of the log.
-    writeRunSnapshot(p, { version: 1, seed, createdAt: nowIso, world: res.finalWorld, map: res.finalWorld.map });
+    writeRunSnapshot(p, {
+      version: 1,
+      seed,
+      createdAt: nowIso,
+      world: res.finalWorld,
+      settings: { seed, paused: true, msPerTick: 60_000 },
+      map: res.finalWorld.map,
+      layout: computeDeterministicLayout(res.finalWorld.map, seed)
+    });
     await writeEventsJsonl(p.eventsPath, res.events);
     console.log(`Persisted run for viewer: seed=${seed} run=${p.runId} dir=${p.runDir}`);
     console.log("");
@@ -572,7 +710,6 @@ async function main() {
 
   const days = numFlag(flags, "days", 30);
   const seed = numFlag(flags, "seed", 1);
-
   const res = runSimulation({ days, seed });
 
   if (cmd === "npcs") {
@@ -695,7 +832,15 @@ async function main() {
     const nowIso = new Date().toISOString();
     writeRunMeta(p, { version: 1, seed, runId: p.runId, startedAt: nowIso, argv: process.argv });
     const w0 = createWorld(seed);
-    writeRunSnapshot(p, { version: 1, seed, createdAt: nowIso, world: w0, map: w0.map });
+    writeRunSnapshot(p, {
+      version: 1,
+      seed,
+      createdAt: nowIso,
+      world: w0,
+      settings: { seed, paused: true, msPerTick: 60_000 },
+      map: w0.map,
+      layout: computeDeterministicLayout(w0.map, seed)
+    });
     await writeEventsJsonl(p.eventsPath, res.events);
     console.log(`\nPersisted run to ${p.runDir}`);
   }

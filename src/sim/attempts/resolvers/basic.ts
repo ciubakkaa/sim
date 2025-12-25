@@ -11,6 +11,10 @@ import { markBusy } from "../../busy";
 import { addFoodLot } from "../../food";
 import { addBelief } from "../../beliefs";
 import { addFoodToBuilding, pickLocationByKinds } from "../../localRules";
+import { getConfig } from "../../config";
+import { createDebt } from "../../systems/debts";
+import { addCoins, addFood, ensureInventory } from "../../systems/inventory";
+import { createFact } from "../../systems/knowledge";
 
 export function resolveDefend(world: WorldState, attempt: Attempt, ctx: ResolveCtx): ResolveResult {
   const h = makeHelpers(world, attempt, ctx);
@@ -83,6 +87,26 @@ export function resolveTravel(world: WorldState, attempt: Attempt, ctx: ResolveC
   return { world: h.world, events: h.events, keyChanges: h.keyChanges };
 }
 
+export function resolveRecon(world: WorldState, attempt: Attempt, ctx: ResolveCtx): ResolveResult {
+  const h = makeHelpers(world, attempt, ctx);
+  const site = h.world.sites[attempt.siteId];
+  if (!isSettlement(site)) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+  const actor = h.world.npcs[attempt.actorId];
+  if (!actor || !actor.alive) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+
+  // Minimal recon: low-impact "scouting" that seeds a small local rumor and consumes time.
+  const label = `${actor.name} scouted quietly in ${site.name}`;
+  h.apply({
+    kind: "npc.patch",
+    npcId: actor.id,
+    patch: { lastAttemptTick: attempt.tick, ...markBusy(actor, h.world.tick, attempt.durationHours, "recon") } as Partial<NpcState>
+  });
+
+  // Keep it private by default; if it becomes public later, rumors will handle spread.
+  h.emit(label, { note: "recon" });
+  return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+}
+
 export function resolveWork(world: WorldState, attempt: Attempt, ctx: ResolveCtx): ResolveResult {
   const h = makeHelpers(world, attempt, ctx);
   const site = h.world.sites[attempt.siteId];
@@ -139,6 +163,14 @@ export function resolveWork(world: WorldState, attempt: Attempt, ctx: ResolveCtx
     npcId: actor.id,
     patch: { lastAttemptTick: attempt.tick, ...markBusy(actor, h.world.tick, attempt.durationHours, attempt.kind) }
   });
+
+  // Pay small wages into personal inventory.
+  const wage = Math.max(0, Math.floor(hours * 1)); // 1 coin/hour baseline
+  if (wage > 0) {
+    const updated = addCoins(h.world.npcs[actor.id]!, wage);
+    h.apply({ kind: "npc.patch", npcId: actor.id, patch: { inventory: updated.inventory } as any });
+  }
+
   h.emit(`${actor.name} worked (${type})`, { type, hours, amount });
   return { world: h.world, events: h.events, keyChanges: h.keyChanges };
 }
@@ -223,6 +255,40 @@ export function resolveHeal(world: WorldState, attempt: Attempt, ctx: ResolveCtx
     healedAmount = ctx.rng.int(8, 18);
     const nextHp = clamp(t.hp + healedAmount, 0, t.maxHp);
     h.apply({ kind: "npc.patch", npcId: t.id, patch: { hp: nextHp } });
+
+    // Rich relationships + debts.
+    // The healed NPC tends to trust/like the healer more.
+    h.apply({
+      kind: "npc.relationship.delta",
+      npcId: t.id,
+      otherNpcId: actor.id,
+      delta: { trust: +12, loyalty: +6, fear: -2 },
+      confidence: 100
+    });
+    // The healer forms a mild bond as well.
+    h.apply({
+      kind: "npc.relationship.delta",
+      npcId: actor.id,
+      otherNpcId: t.id,
+      delta: { trust: +3, loyalty: +2 },
+      confidence: 100
+    });
+
+    // Create a favor debt: the healed NPC owes the healer.
+    const magnitude = clamp(Math.round(healedAmount * 3), 10, 80);
+    h.apply({
+      kind: "npc.debt.add",
+      npcId: t.id,
+      debt: createDebt({
+        id: makeId("debt", h.world.tick, ctx.nextEventSeq()),
+        createdTick: h.world.tick,
+        otherNpcId: actor.id,
+        direction: "owes",
+        debtKind: "favor_granted",
+        magnitude,
+        reason: `${actor.name} healed me (+${healedAmount}hp)`
+      })
+    });
   }
 
   h.apply({
@@ -316,6 +382,20 @@ export function resolveInvestigate(world: WorldState, attempt: Attempt, ctx: Res
       });
       h.apply({ kind: "npc.patch", npcId: actor.id, patch: { beliefs: nextActor.beliefs } });
 
+      // Record asymmetric knowledge.
+      h.apply({
+        kind: "npc.knowledge.fact.add",
+        npcId: actor.id,
+        fact: createFact({
+          tick: h.world.tick,
+          kind: "identified_cult_member",
+          subjectId: t.id,
+          object: "true",
+          confidence: 80,
+          source: "witnessed"
+        })
+      });
+
       // Task 18: share investigation findings with other guards at the same site.
       const guardsHere = Object.values(h.world.npcs).filter(
         (n) =>
@@ -335,6 +415,19 @@ export function resolveInvestigate(world: WorldState, attempt: Attempt, ctx: Res
           tick: h.world.tick
         });
         h.apply({ kind: "npc.patch", npcId: g.id, patch: { beliefs: updated.beliefs } });
+
+        h.apply({
+          kind: "npc.knowledge.fact.add",
+          npcId: g.id,
+          fact: createFact({
+            tick: h.world.tick,
+            kind: "identified_cult_member",
+            subjectId: t.id,
+            object: "true",
+            confidence: 60,
+            source: "report"
+          })
+        });
       }
 
       // Task 18: propagate identification to nearby guards (neighboring sites).
@@ -357,6 +450,19 @@ export function resolveInvestigate(world: WorldState, attempt: Attempt, ctx: Res
             tick: h.world.tick
           });
           h.apply({ kind: "npc.patch", npcId: g.id, patch: { beliefs: updated.beliefs } });
+
+          h.apply({
+            kind: "npc.knowledge.fact.add",
+            npcId: g.id,
+            fact: createFact({
+              tick: h.world.tick,
+              kind: "identified_cult_member",
+              subjectId: t.id,
+              object: "true",
+              confidence: 50,
+              source: "report"
+            })
+          });
         }
       }
 
@@ -377,6 +483,120 @@ export function resolveInvestigate(world: WorldState, attempt: Attempt, ctx: Res
   });
   h.emit(`${actor.name} investigated`, { success, roll, chance, unrestDelta, identifiedTargetId, discoveredHideoutBonus });
   if (attempt.visibility === "public") h.addPublicRumor(`${actor.name} investigated`, 75);
+  return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+}
+
+export function resolveGossip(world: WorldState, attempt: Attempt, ctx: ResolveCtx): ResolveResult {
+  const h = makeHelpers(world, attempt, ctx);
+  const site = h.world.sites[attempt.siteId];
+  if (!isSettlement(site)) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+
+  const actor = h.world.npcs[attempt.actorId];
+  const target = attempt.targetId ? h.world.npcs[attempt.targetId] : undefined;
+  if (!actor || !actor.alive || !target || !target.alive) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+  if (actor.siteId !== attempt.siteId || target.siteId !== attempt.siteId) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+
+  // Try to gossip about a concrete known fact (best: identified cult member), otherwise generic.
+  const known = actor.knowledge?.facts?.find((f) => f.kind === "identified_cult_member");
+  const subjectId = known?.subjectId;
+  const subject = subjectId ? h.world.npcs[subjectId] : undefined;
+
+  const label = subject
+    ? `${actor.name} gossiped that ${subject.name} may be cult`
+    : `${actor.name} gossiped about trouble in ${site.name}`;
+
+  // Emit public rumor (and relationship effects via rumor system).
+  h.addPublicRumor(label, subject ? 65 : 45);
+
+  // Update target's asymmetric knowledge.
+  h.apply({
+    kind: "npc.knowledge.fact.add",
+    npcId: target.id,
+    fact: createFact({
+      tick: h.world.tick,
+      kind: "heard_rumor",
+      subjectId: actor.id,
+      object: label,
+      confidence: subject ? 60 : 40,
+      source: "rumor"
+    })
+  });
+
+  // Small relationship nudge: gossiping builds rapport if trust isn't awful.
+  h.apply({
+    kind: "npc.relationship.delta",
+    npcId: target.id,
+    otherNpcId: actor.id,
+    delta: { trust: +1, loyalty: +1 },
+    confidence: 60
+  });
+
+  h.apply({
+    kind: "npc.patch",
+    npcId: actor.id,
+    patch: { lastAttemptTick: attempt.tick, ...markBusy(actor, h.world.tick, attempt.durationHours, "gossip") } as Partial<NpcState>
+  });
+
+  h.emit(label, { targetId: target.id, subjectId: subject?.id });
+  return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+}
+
+export function resolveBlackmail(world: WorldState, attempt: Attempt, ctx: ResolveCtx): ResolveResult {
+  const h = makeHelpers(world, attempt, ctx);
+  const site = h.world.sites[attempt.siteId];
+  if (!isSettlement(site)) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+
+  const actor = h.world.npcs[attempt.actorId];
+  const target = attempt.targetId ? h.world.npcs[attempt.targetId] : undefined;
+  if (!actor || !actor.alive || !target || !target.alive) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+  if (actor.siteId !== attempt.siteId || target.siteId !== attempt.siteId) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+
+  // Requires leverage: either a secret about the target, or a strong "identified cult member" fact.
+  const hasCultLeverage = Boolean(actor.knowledge?.facts?.some((f) => f.kind === "identified_cult_member" && f.subjectId === target.id && f.confidence >= 60));
+  const hasSecretLeverage = Boolean(
+    actor.knowledge?.secrets?.some((sk) => {
+      const sec = h.world.secrets?.[sk.secretId];
+      return sec && sec.subjectId === target.id && sk.confidence >= 50;
+    })
+  );
+  const leverage = hasCultLeverage || hasSecretLeverage;
+
+  const score = actor.traits.Greed * 0.45 + actor.traits.Suspicion * 0.25 + actor.traits.Discipline * 0.15 + (100 - actor.traits.Integrity) * 0.15;
+  const resist = target.traits.Courage * 0.45 + target.traits.Integrity * 0.35 + target.traits.Discipline * 0.2;
+  const baseChance = leverage ? 55 : 15;
+  const chance = clamp(baseChance + (score - resist) * 0.4, 5, 95);
+  const roll = ctx.rng.int(0, 99);
+  const success = roll < chance;
+
+  const actorInv = ensureInventory(actor);
+  const targetInv = ensureInventory(target);
+  const demand = clamp(5 + ctx.rng.int(0, 20), 1, 50);
+  const paid = success ? Math.min(targetInv.coins ?? 0, demand) : 0;
+
+  if (success && paid > 0) {
+    h.apply({ kind: "npc.patch", npcId: target.id, patch: { inventory: { ...targetInv, coins: (targetInv.coins ?? 0) - paid } } as any });
+    h.apply({ kind: "npc.patch", npcId: actor.id, patch: { inventory: { ...actorInv, coins: (actorInv.coins ?? 0) + paid } } as any });
+  }
+
+  // Relationship impact: target loses trust, gains fear. Actor gains a bit of shame if they have integrity.
+  h.apply({
+    kind: "npc.relationship.delta",
+    npcId: target.id,
+    otherNpcId: actor.id,
+    delta: { trust: success ? -18 : -6, fear: success ? +12 : +4, loyalty: -4 },
+    confidence: 90
+  });
+
+  // Blackmail creates a strong rumor if public; otherwise keep it quiet.
+  if (attempt.visibility === "public") h.addPublicRumor(`${actor.name} threatened ${target.name}`, success ? 70 : 45);
+
+  h.apply({
+    kind: "npc.patch",
+    npcId: actor.id,
+    patch: { lastAttemptTick: attempt.tick, ...markBusy(actor, h.world.tick, attempt.durationHours, "blackmail") } as Partial<NpcState>
+  });
+
+  h.emit(`${actor.name} attempted blackmail`, { success, roll, chance, leverage, demand, paid, targetId: target.id });
   return { world: h.world, events: h.events, keyChanges: h.keyChanges };
 }
 
@@ -414,6 +634,13 @@ export function resolveSteal(world: WorldState, attempt: Attempt, ctx: ResolveCt
     npcId: actor.id,
     patch: { lastAttemptTick: attempt.tick, ...markBusy(actor, h.world.tick, attempt.durationHours, "steal") }
   });
+
+  // Successful steal yields personal food inventory.
+  if (success && taken > 0) {
+    const updated = addFood(h.world.npcs[actor.id]!, targetType as any, taken);
+    h.apply({ kind: "npc.patch", npcId: actor.id, patch: { inventory: updated.inventory } as any });
+  }
+
   h.emit(`${actor.name} attempted theft`, { success, taken, targetType, roll, chance, witnessed });
 
   if (witnessed) {

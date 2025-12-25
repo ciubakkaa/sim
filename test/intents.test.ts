@@ -2,9 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createWorld } from "../src/sim/worldSeed";
 import { addBelief } from "../src/sim/beliefs";
-import { updateIntents } from "../src/sim/intents/engine";
+import { emitSignalsFromState } from "../src/sim/systems/signals";
 
-test("intents: witnessed_crime can form an attack intent and may signal", () => {
+test("signals: witnessed_crime can emit an intent.signaled tell for attack", () => {
   let world = createWorld(1);
 
   // Find two NPCs at the same site.
@@ -33,11 +33,7 @@ test("intents: witnessed_crime can form an attack intent and may signal", () => 
   };
   world = { ...world, npcs: { ...world.npcs, [a.id]: a } };
 
-  const res = updateIntents(world, { nextEventSeq: (() => { let i = 0; return () => ++i; })() });
-  const updatedA = res.world.npcs[a.id]!;
-
-  const attack = (updatedA.intents ?? []).find((it) => it.kind === "attack" && it.targetNpcId === b.id);
-  assert.ok(attack, "expected attack intent to form");
+  const res = emitSignalsFromState(world, (() => { let i = 0; return () => ++i; })());
 
   // If intensity crosses the threshold, we should see a signal event.
   const signaled = res.events.some((e) => e.kind === "intent.signaled" && (e.data as any)?.actorId === a.id);

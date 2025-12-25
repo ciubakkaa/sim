@@ -38,6 +38,10 @@ export function NpcInspector(props: Props) {
 
   const goals = (npc.goals ?? []).slice().sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0) || a.definitionId.localeCompare(b.definitionId));
   const intents = (npc.intents ?? []).slice().sort((a, b) => (b.intensity ?? 0) - (a.intensity ?? 0) || String(a.kind).localeCompare(String(b.kind)));
+  const debts = npc.debts ?? [];
+  const inv = npc.inventory;
+  const knowledge = npc.knowledge;
+  const plan = npc.plan;
 
   return (
     <div style={{ height: "100%", overflow: "auto", padding: 12, display: "grid", gap: 12 }}>
@@ -50,6 +54,129 @@ export function NpcInspector(props: Props) {
 
       <div style={{ color: "var(--muted)", fontSize: 12 }}>
         site={npc.siteId} • home={npc.homeSiteId} • cult={npc.cult?.member ? "yes" : "no"} • family={npc.familyIds?.length ?? 0}
+      </div>
+
+      <div style={cardStyle}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+          <div style={{ fontWeight: 700 }}>Plan</div>
+          <div style={{ flex: 1 }} />
+          <div style={{ color: "var(--muted)", fontSize: 12 }}>{plan ? "active" : "(none)"}</div>
+        </div>
+        {!plan ? (
+          <div style={{ color: "var(--muted)" }}>(none)</div>
+        ) : (
+          <div style={{ display: "grid", gap: 6 }}>
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>goal={plan.goal}</div>
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>
+              step {Number(plan.stepIndex ?? 0) + 1}/{plan.steps?.length ?? 0}
+            </div>
+            {plan.reason ? <div style={{ color: "rgba(255,255,255,0.75)", fontSize: 12 }}>{plan.reason}</div> : null}
+            {plan.steps?.length ? (
+              <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                steps:{" "}
+                {plan.steps
+                  .slice(0, 8)
+                  .map((s, i) => `${i === Number(plan.stepIndex ?? 0) ? "▶" : ""}${s.kind}`)
+                  .join(" → ")}
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      <div style={cardStyle}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+          <div style={{ fontWeight: 700 }}>Inventory</div>
+          <div style={{ flex: 1 }} />
+          <div style={{ color: "var(--muted)", fontSize: 12 }}>{inv ? `coins=${Math.round(Number(inv.coins ?? 0))}` : "(none)"}</div>
+        </div>
+        {!inv ? (
+          <div style={{ color: "var(--muted)" }}>(none)</div>
+        ) : (
+          <div style={{ display: "grid", gap: 6 }}>
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>coins={Math.round(Number(inv.coins ?? 0))}</div>
+            <div style={{ color: "var(--muted)", fontSize: 12 }}>
+              food:{" "}
+              {inv.food
+                ? Object.entries(inv.food)
+                    .map(([k, v]) => `${k}=${Math.round(Number(v))}`)
+                    .join(", ")
+                : "(none)"}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={cardStyle}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+          <div style={{ fontWeight: 700 }}>Debts</div>
+          <div style={{ flex: 1 }} />
+          <div style={{ color: "var(--muted)", fontSize: 12 }}>({debts.length})</div>
+        </div>
+        {debts.length === 0 ? (
+          <div style={{ color: "var(--muted)" }}>(none)</div>
+        ) : (
+          <div style={{ display: "grid", gap: 6 }}>
+            {debts
+              .slice()
+              .sort((a, b) => (b.magnitude ?? 0) - (a.magnitude ?? 0))
+              .slice(0, 12)
+              .map((d) => (
+                <div key={d.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12 }}>
+                  <div style={{ color: "var(--text)" }}>
+                    {d.direction} {labelNpc(props.world, d.otherNpcId)} • {d.debtKind}
+                    {d.reason ? <span style={{ color: "rgba(255,255,255,0.65)" }}> • {d.reason}</span> : null}
+                  </div>
+                  <div style={{ color: "var(--muted)" }}>{Math.round(Number(d.magnitude ?? 0))}</div>
+                </div>
+              ))}
+          </div>
+        )}
+      </div>
+
+      <div style={cardStyle}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+          <div style={{ fontWeight: 700 }}>Knowledge</div>
+          <div style={{ flex: 1 }} />
+          <div style={{ color: "var(--muted)", fontSize: 12 }}>
+            facts={knowledge?.facts?.length ?? 0} • secrets={knowledge?.secrets?.length ?? 0}
+          </div>
+        </div>
+        {!knowledge?.facts?.length && !knowledge?.secrets?.length ? (
+          <div style={{ color: "var(--muted)" }}>(none)</div>
+        ) : (
+          <div style={{ display: "grid", gap: 10 }}>
+            {knowledge?.facts?.length ? (
+              <div style={{ display: "grid", gap: 6 }}>
+                <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 700 }}>Facts</div>
+                {knowledge.facts
+                  .slice()
+                  .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0) || (b.tick ?? 0) - (a.tick ?? 0))
+                  .slice(0, 10)
+                  .map((f) => (
+                    <div key={f.id} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12 }}>
+                      <div style={{ color: "var(--muted)" }}>
+                        {f.kind} {labelNpc(props.world, f.subjectId)}
+                        {f.object ? <span style={{ color: "rgba(255,255,255,0.7)" }}> • {String(f.object)}</span> : null}
+                      </div>
+                      <div style={{ color: "var(--muted)" }}>{Math.round(Number(f.confidence ?? 0))}</div>
+                    </div>
+                  ))}
+              </div>
+            ) : null}
+            {knowledge?.secrets?.length ? (
+              <div style={{ display: "grid", gap: 6 }}>
+                <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 700 }}>Secrets</div>
+                {knowledge.secrets.slice(0, 10).map((s) => (
+                  <div key={s.secretId} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12 }}>
+                    <div style={{ color: "var(--muted)" }}>{s.secretId}</div>
+                    <div style={{ color: "var(--muted)" }}>{Math.round(Number(s.confidence ?? 0))}</div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
 
       <div style={cardStyle}>

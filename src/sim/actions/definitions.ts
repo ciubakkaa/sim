@@ -1,6 +1,27 @@
 import type { ActionDefinition } from "./types";
 
 export const ACTION_DEFINITIONS: ActionDefinition[] = [
+  // ============ OPERATIONS / RECON ============
+  {
+    kind: "recon",
+    preconditions: [
+      { type: "atSiteKind", kinds: ["settlement"] },
+      { type: "hasCategory", categories: ["ConcordDevotee", "ConcordEnforcer", "ConcordCellLeaderRitualist"] },
+      { type: "notBusy" },
+      { type: "notTraveling" },
+      { type: "notDetained" }
+    ],
+    baseWeight: 6,
+    needWeights: { Safety: -0.1, Meaning: 0.15 },
+    traitWeights: { Suspicion: 0.25, Curiosity: 0.2, Discipline: 0.1 },
+    siteConditionWeights: [{ field: "unrest", op: ">", threshold: 40, weight: 5 }],
+    beliefWeights: [],
+    relationshipWeights: [],
+    durationHours: 1,
+    visibility: "private",
+    magnitude: "minor"
+  },
+
   // ============ WORK ACTIONS ============
   {
     kind: "work_farm",
@@ -85,6 +106,28 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
     targetSelector: { type: "anyNpcAtSite", excludeSelf: true }
   },
   {
+    kind: "gossip",
+    preconditions: [
+      { type: "atSiteKind", kinds: ["settlement"] },
+      { type: "notBusy" },
+      { type: "notTraveling" },
+      { type: "hasTarget", selector: { type: "anyNpcAtSite", excludeSelf: true } }
+    ],
+    baseWeight: 10,
+    needWeights: { Status: 0.25, Meaning: 0.1 },
+    traitWeights: { Curiosity: 0.25, Empathy: 0.1, Suspicion: 0.15 },
+    siteConditionWeights: [
+      { field: "unrest", op: ">", threshold: 50, weight: 10 },
+      { field: "cultInfluence", op: ">", threshold: 30, weight: 10 }
+    ],
+    beliefWeights: [],
+    relationshipWeights: [{ field: "trust", op: ">", threshold: 30, weight: 5 }],
+    durationHours: 1,
+    visibility: "public",
+    magnitude: "minor",
+    targetSelector: { type: "anyNpcAtSite", excludeSelf: true }
+  },
+  {
     kind: "steal",
     preconditions: [
       { type: "atSiteKind", kinds: ["settlement"] },
@@ -104,6 +147,26 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
     durationHours: 1,
     visibility: "private",
     magnitude: "normal"
+  },
+  {
+    kind: "blackmail",
+    preconditions: [
+      { type: "atSiteKind", kinds: ["settlement"] },
+      { type: "notBusy" },
+      { type: "notTraveling" },
+      { type: "notDetained" },
+      { type: "hasTarget", selector: { type: "anyNpcAtSite", excludeSelf: true } }
+    ],
+    baseWeight: 2,
+    needWeights: { Wealth: 0.5, Safety: -0.2, Status: 0.1 },
+    traitWeights: { Greed: 0.35, Integrity: -0.35, Suspicion: 0.15 },
+    siteConditionWeights: [{ field: "unrest", op: ">", threshold: 55, weight: 10 }],
+    beliefWeights: [],
+    relationshipWeights: [{ field: "trust", op: "<", threshold: 25, weight: 10 }],
+    durationHours: 1,
+    visibility: "private",
+    magnitude: "normal",
+    targetSelector: { type: "anyNpcAtSite", excludeSelf: true }
   },
 
   // ============ COMBAT & VIOLENCE ============

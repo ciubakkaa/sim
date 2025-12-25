@@ -6,6 +6,39 @@ import { isSettlement } from "../rumors";
 import { markBusy } from "../../busy";
 import { totalFood, addFoodLot } from "../../food";
 import { tickToDay } from "../../types";
+import { getConfig } from "../../config";
+import { addCoins, addFood, takeFood } from "../../systems/inventory";
+
+function clampInt(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, Math.floor(n)));
+}
+
+function pickMostAbundantFoodType(site: SettlementSiteState): FoodType {
+  const totals = totalFood(site.food);
+  const types: FoodType[] = ["grain", "fish", "meat"];
+  types.sort((a, b) => (totals[b] ?? 0) - (totals[a] ?? 0) || a.localeCompare(b));
+  return types[0]!;
+}
+
+function marketBuyPricePerUnit(site: SettlementSiteState): number {
+  const cfg = getConfig();
+  const base = cfg.tuning.baseFoodPrice ?? 5;
+  const range = cfg.tuning.priceFluctuationRange ?? 0.5;
+  const hunger = clamp(site.hunger ?? 0, 0, 100);
+
+  // Hunger multiplier: 0.5x..1.5x by default (range=0.5).
+  const hungerMult = 1 + range * ((hunger - 50) / 50);
+
+  // Supply multiplier: lower stored food => pricier.
+  const totals = totalFood(site.food);
+  const stored = (totals.grain ?? 0) + (totals.fish ?? 0) + (totals.meat ?? 0);
+  const pop = (site.cohorts?.children ?? 0) + (site.cohorts?.adults ?? 0) + (site.cohorts?.elders ?? 0);
+  const dailyNeed = Math.max(1, pop);
+  const daysStored = stored / dailyNeed; // rough
+  const supplyMult = clamp(1.4 - Math.min(1.2, daysStored / 6), 0.7, 1.4); // 0.7..1.4
+
+  return clampInt(base * hungerMult * supplyMult, 1, 500);
+}
 
 function getTarget(world: WorldState, attempt: Attempt): NpcState | undefined {
   if (!attempt.targetId) return undefined;
@@ -19,6 +52,69 @@ export function resolveTrade(world: WorldState, attempt: Attempt, ctx: ResolveCt
 
   const actor = h.world.npcs[attempt.actorId];
   if (!actor || !actor.alive) return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+
+  // Local market buy/sell loop.
+  // If a `targetId` is present, treat it as an inter-settlement trade contract and run the
+  // Task 19 trade flow (below) instead of local market logic.
+  if (!attempt.targetId) {
+    const inv = actor.inventory ?? { coins: 0, food: {} };
+    const foodNeed = Number((actor.needs as any)?.Food ?? 0);
+    const wealthNeed = Number((actor.needs as any)?.Wealth ?? 0);
+
+    const type = pickMostAbundantFoodType(site);
+    const priceBuy = marketBuyPricePerUnit(site);
+    const priceSell = Math.max(1, Math.floor(priceBuy * 0.8));
+
+    const available = site.food[type].reduce((a, l) => a + l.amount, 0);
+    const personal = inv.food?.[type] ?? 0;
+    const personalFoodTotal = (inv.food?.grain ?? 0) + (inv.food?.fish ?? 0) + (inv.food?.meat ?? 0);
+
+    // Simple decision: buy when hungry; sell when poor and has food.
+    const wantBuy = inv.coins >= priceBuy && available > 0 && (personalFoodTotal < 3 || foodNeed >= 55);
+    const wantSell = !wantBuy && personal > 0 && (wealthNeed >= 55 || inv.coins < priceBuy);
+
+    let action: "buy" | "sell" | "none" = "none";
+    let qty = 0;
+    let totalPrice = 0;
+
+    if (wantBuy) {
+      action = "buy";
+      const desired = clampInt(Math.ceil(foodNeed / 10) * 2, 1, 18);
+      const affordable = clampInt(inv.coins / priceBuy, 0, 9999);
+      qty = Math.min(desired, affordable, available);
+      totalPrice = qty * priceBuy;
+      if (qty > 0) {
+        h.apply({ kind: "site.food.take", siteId: site.id, foodType: type, amount: qty, takeFrom: "newest" });
+        const withFood = addFood(h.world.npcs[actor.id]!, type, qty);
+        const withCoins = addCoins(withFood, -totalPrice);
+        h.apply({ kind: "npc.patch", npcId: actor.id, patch: { inventory: withCoins.inventory } as any });
+      }
+    } else if (wantSell) {
+      action = "sell";
+      qty = Math.min(personal, clampInt(Math.ceil(wealthNeed / 10) * 2, 1, 12));
+      totalPrice = qty * priceSell;
+      if (qty > 0) {
+        const taken = takeFood(h.world.npcs[actor.id]!, type, qty);
+        const paid = addCoins(taken.npc, totalPrice);
+        h.apply({ kind: "npc.patch", npcId: actor.id, patch: { inventory: paid.inventory } as any });
+        const day = tickToDay(h.world.tick);
+        const updatedSite = addFoodLot(site, type, qty, day);
+        h.apply({ kind: "site.patch", siteId: site.id, patch: { food: updatedSite.food } as any });
+      }
+    }
+
+    h.apply({
+      kind: "npc.patch",
+      npcId: actor.id,
+      patch: { lastAttemptTick: attempt.tick, ...markBusy(actor, h.world.tick, attempt.durationHours, "trade") }
+    });
+
+    h.emit(`${actor.name} traded at the market`, {
+      market: { action, type, qty, priceBuy, priceSell, totalPrice, available, hunger: site.hunger ?? 0 }
+    });
+    if (attempt.visibility === "public") h.addPublicRumor(`${actor.name} traded at the market`, 45);
+    return { world: h.world, events: h.events, keyChanges: h.keyChanges };
+  }
 
   // Task 19: basic inter-settlement food trade (surplus -> deficit).
   const settlements = h.world.map.sites.map((id) => h.world.sites[id]).filter(isSettlement);
@@ -93,6 +189,14 @@ export function resolveTrade(world: WorldState, attempt: Attempt, ctx: ResolveCt
     npcId: actor.id,
     patch: { lastAttemptTick: attempt.tick, ...markBusy(actor, h.world.tick, attempt.durationHours, "trade") }
   });
+
+  // Small commission into personal inventory.
+  if (success && transfer?.amount) {
+    const commission = Math.max(1, Math.floor(transfer.amount / 10));
+    const updated = addCoins(h.world.npcs[actor.id]!, commission);
+    h.apply({ kind: "npc.patch", npcId: actor.id, patch: { inventory: updated.inventory } as any });
+  }
+
   h.emit(`${actor.name} traded in ${site.name}`, { deltaMorale, deltaUnrest, success, roll, successChance, disrupted, transfer });
   if (attempt.visibility === "public") h.addPublicRumor(`${actor.name} traded`, 50);
 

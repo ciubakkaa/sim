@@ -1,4 +1,4 @@
-import type { Belief, DeathCause, FoodType, NpcId, NpcState, Relationship, SiteId, SiteRumor, SiteState, SimTick } from "../types";
+import type { Belief, DeathCause, FoodType, KnowledgeFact, NpcId, NpcState, Relationship, SiteId, SiteRumor, SiteState, SimTick, SocialDebt } from "../types";
 
 export type NpcPatch = {
   kind: "npc.patch";
@@ -25,6 +25,18 @@ export type NpcRelationshipDelta = {
   otherNpcId: NpcId;
   delta: Partial<Relationship>;
   confidence: number; // 0..100
+};
+
+export type NpcDebtAdd = {
+  kind: "npc.debt.add";
+  npcId: NpcId;
+  debt: SocialDebt;
+};
+
+export type NpcKnowledgeFactAdd = {
+  kind: "npc.knowledge.fact.add";
+  npcId: NpcId;
+  fact: KnowledgeFact;
 };
 
 export type SitePatch = {
@@ -61,6 +73,8 @@ export type AttemptConsequence =
   | NpcNumberDelta
   | NpcBeliefAdd
   | NpcRelationshipDelta
+  | NpcDebtAdd
+  | NpcKnowledgeFactAdd
   | SitePatch
   | NpcKilled
   | FoodTake

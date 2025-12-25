@@ -14,8 +14,17 @@ import { updateStates } from "./states/engine";
 import { clamp } from "./util";
 import { applyBeliefsFromEvents } from "./beliefs/creation";
 import { updateGoals } from "./goals/engine";
-import { updateIntents } from "./intents/engine";
 import { processPendingAttempts, scheduleAttemptIfNeeded } from "./attempts/lifecycle";
+import { createMemoriesFromEvents, decayMemoriesDaily } from "./systems/memory";
+import { applyPlanProgressFromEvents, updatePlans } from "./systems/planning";
+import { applyOperationProgressFromEvents, updateFactionOperationsWithEvents } from "./systems/factionOps";
+import { updateChronicleFromEvents } from "./systems/narrative";
+import { updatePerception } from "./systems/perception";
+import { createSecretsFromEvents } from "./systems/secrets";
+import { decayRumorsDaily, spreadRumorsDaily } from "./attempts/rumors";
+import { syncEntitiesFromNpcs } from "./entities";
+import { decayEmotionsHourly, getEmotions } from "./systems/emotions";
+import { emitSignalsFromState } from "./systems/signals";
 
 export type TickOptions = {
   attempts?: Attempt[];
@@ -58,7 +67,10 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
   events.push(...movedLocal.events);
   keyChanges.push(...movedLocal.keyChanges);
 
-  const detention = progressDetentionHourly(movedLocal.world, { rng, nextEventSeq });
+  // v2: Perception snapshot updates (knowledge about who is where).
+  const perceived = updatePerception(movedLocal.world, rng);
+
+  const detention = progressDetentionHourly(perceived, { rng, nextEventSeq });
   events.push(...detention.events);
   keyChanges.push(...detention.keyChanges);
 
@@ -73,6 +85,7 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
     for (const npc of Object.values(withNeeds.npcs)) {
       // Small trauma decay each hour (details fade, emotion fades slowly).
       const trauma = npc.alive ? Math.max(0, npc.trauma - 0.2) : npc.trauma;
+      const emotions = npc.alive ? decayEmotionsHourly({ ...npc, emotions: getEmotions(npc) }) : npc.emotions;
 
       // Home tracking (Task 8):
       // - set awayFromHomeSinceTick when first leaving home
@@ -134,21 +147,31 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
         }
       }
 
-      const updated = { ...npc, trauma, homeSiteId, awayFromHomeSinceTick, consecutiveHungerHours, hp, alive, death };
+      const updated = { ...npc, trauma, emotions, homeSiteId, awayFromHomeSinceTick, consecutiveHungerHours, hp, alive, death };
       nextNpcs[npc.id] = { ...updated, needs: computeNpcNeeds(updated, withNeeds) };
     }
     withNeeds = { ...withNeeds, npcs: nextNpcs };
   }
 
-  // Goals v1: update/maintain parallel goals before attempt generation.
+  // Goals: update/maintain parallel goals before attempt generation.
   withNeeds = updateGoals(withNeeds, { rng });
 
-  // Intents: short-lived internal impulses/plans (can also emit public signals/rumor incidents).
+  // Signals: lightweight public "tells" derived from current state (no separate intent state).
   {
-    const intentsRes = updateIntents(withNeeds, { nextEventSeq });
-    withNeeds = intentsRes.world;
-    events.push(...intentsRes.events);
-    keyChanges.push(...intentsRes.keyChanges);
+    const sig = emitSignalsFromState(withNeeds, nextEventSeq);
+    withNeeds = sig.world;
+    events.push(...sig.events);
+    keyChanges.push(...sig.keyChanges);
+  }
+
+  // v2: Minimal planning - create/refresh plans before generating attempts.
+  withNeeds = updatePlans(withNeeds, nextEventSeq);
+
+  // v2: Faction operations planning (creates/maintains world.operations).
+  {
+    const opRes = updateFactionOperationsWithEvents(withNeeds, nextEventSeq);
+    withNeeds = opRes.world;
+    events.push(...opRes.events);
   }
 
   // Execute any due pending attempts before generating new ones.
@@ -203,11 +226,34 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
   // Task 13: create beliefs from observed events/attempts before reactive state updates.
   afterAttempts = applyBeliefsFromEvents(afterAttempts, events);
 
+  // v2: plan progress from executed attempts.
+  afterAttempts = applyPlanProgressFromEvents(afterAttempts, events);
+
+  // v2: secrets from executed attempts/events.
+  afterAttempts = createSecretsFromEvents(afterAttempts, events, nextEventSeq);
+
+  // v2: operation phase progress from executed attempts/events (emit milestone events for narrative).
+  {
+    const opProg = applyOperationProgressFromEvents(afterAttempts, events, nextEventSeq);
+    afterAttempts = opProg.world;
+    events.push(...opProg.events);
+  }
+
+  // v2: narrative chronicle update from this tick's events.
+  afterAttempts = updateChronicleFromEvents(afterAttempts, events, nextEventSeq);
+
   // Reactive state updates (v2 AI system): triggers from this tick's events and world diffs.
   afterAttempts = updateStates(afterAttempts, withNeeds, events);
 
   // Notability promotion from notable events (Phase 4.4 minimal).
   afterAttempts = applyNotabilityFromEvents(afterAttempts, events);
+
+  // v2: Create memories from observed events.
+  {
+    const memResult = createMemoriesFromEvents(afterAttempts, events, nextEventSeq);
+    afterAttempts = memResult.world;
+    events.push(...memResult.memoryEvents);
+  }
 
   const hourOfDay = tickToHourOfDay(afterAttempts.tick);
   const isEndOfDay = hourOfDay === 23;
@@ -225,6 +271,17 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
     }
 
     afterAttempts = decayNotabilityDaily(afterAttempts);
+
+    // v2: Daily memory decay.
+    {
+      const memDecay = decayMemoriesDaily(afterAttempts, nextEventSeq);
+      afterAttempts = memDecay.world;
+      events.push(...memDecay.events);
+    }
+
+    // v2: rumor decay + inter-site spread.
+    afterAttempts = decayRumorsDaily(afterAttempts);
+    afterAttempts = spreadRumorsDaily(afterAttempts, rng);
 
     const day = tickToDay(afterAttempts.tick);
     const sites: DailySummary["sites"] = Object.values(afterAttempts.sites).map((s) => {
@@ -298,6 +355,9 @@ export function tickHour(world: WorldState, opts: TickOptions = {}): TickResult 
       data: { summary: dailySummary }
   });
   }
+
+  // v2: keep optional entity registry synced as a derived view of named NPCs.
+  afterAttempts = syncEntitiesFromNpcs(afterAttempts);
 
   return { world: afterAttempts, events, dailySummary };
 }

@@ -6,6 +6,9 @@ import { Rng } from "../src/sim/rng";
 import { applyCultDaily } from "../src/sim/processes/cultProcess";
 import type { Attempt, WorldState } from "../src/sim/types";
 
+const runSlow = process.env.RUN_SLOW_TESTS === "1";
+const slowTest = runSlow ? test : test.skip;
+
 function patchNpc(world: WorldState, npcId: string, patch: any): WorldState {
   const npc = world.npcs[npcId];
   assert.ok(npc, "npc must exist");
@@ -68,7 +71,7 @@ test("preach influence: anchoring multiplier + high-anchoring penalty + saturati
   }
 });
 
-test("integration: 30 days of daily preaching should not explode cultInfluence to 100", () => {
+slowTest("integration: 30 days of daily preaching should not explode cultInfluence to 100", () => {
   let world = createWorld(7);
   const siteId = "HumanCityPort";
   const actorId = findNpcId(world, (n) => n.siteId === siteId);

@@ -91,6 +91,16 @@ export type DeathCause = "starvation" | "illness" | "murder" | "raid" | "unknown
 
 export type SiteKind = "settlement" | "terrain" | "special" | "hideout";
 
+export type EmotionalState = {
+  anger: number; // 0..100
+  fear: number; // 0..100
+  grief: number; // 0..100
+  gratitude: number; // 0..100
+  pride: number; // 0..100
+  shame: number; // 0..100
+  stress: number; // 0..100
+};
+
 export type BaseSiteState = {
   id: SiteId;
   kind: SiteKind;
@@ -178,6 +188,111 @@ export type WorldState = {
 
   // Named NPCs (Phase 4). Cohorts still represent background population.
   npcs: Record<NpcId, NpcState>;
+
+  // v2: optional entity registry (derived view of named NPCs; opt-in).
+  // This intentionally mirrors `npcs` for a gradual migration path.
+  entities?: Record<EntityId, NpcState>;
+
+  // v2: optional world-level secrets registry (opt-in).
+  secrets?: Record<string, Secret>;
+
+  // v2: optional faction operations registry (opt-in).
+  operations?: Record<string, FactionOperation>;
+
+  // v2: optional narrative chronicle (opt-in).
+  chronicle?: ChronicleState;
+};
+
+// v2: Minimal faction operations (opt-in via useFactionOperations).
+export type FactionId = "cult" | "guards" | "bandits";
+
+export type OperationType = "kidnap" | "forced_eclipse" | "raid";
+
+export type OperationStatus = "planning" | "active" | "completed" | "failed" | "aborted";
+
+export type OperationPhase = {
+  kind: AttemptKind;
+  note?: string;
+};
+
+export type FactionOperation = {
+  id: string;
+  factionId: FactionId;
+  type: OperationType;
+  siteId: SiteId;
+  targetNpcId?: NpcId;
+  leaderNpcId: NpcId;
+  participantNpcIds: NpcId[];
+  participantRoles?: Partial<Record<NpcId, "leader" | "enforcer" | "scout" | "lookout">>;
+  createdTick: SimTick;
+  status: OperationStatus;
+  // Lightweight scheduling:
+  executeAfterTick?: SimTick;
+  note?: string;
+
+  // v2+: multi-phase execution (optional, defaults to single phase = `type`)
+  phases?: OperationPhase[];
+  phaseIndex?: number;
+  lastProgressTick?: SimTick;
+  failures?: number;
+};
+
+// v2: Minimal narrative/chronicle (opt-in via useNarrative).
+export type ChronicleEntryKind = "death" | "murder" | "kidnap" | "raid" | "forced_eclipse" | "major_event";
+
+export type ChronicleSignificance = "minor" | "notable" | "major";
+
+export type ChronicleEntry = {
+  id: string;
+  tick: SimTick;
+  kind: ChronicleEntryKind;
+  significance: ChronicleSignificance;
+  siteId?: SiteId;
+  headline: string;
+  description: string;
+  primaryNpcId?: NpcId;
+  otherNpcIds?: NpcId[];
+  sourceEventId?: string;
+};
+
+export type StoryBeat = {
+  id: string;
+  tick: SimTick;
+  kind: ChronicleEntryKind;
+  siteId?: SiteId;
+  primaryNpcId?: NpcId;
+  description: string;
+  sourceEventId?: string;
+};
+
+// v2+: minimal narrative arcs/acts (opt-in via useNarrative).
+export type NarrativeArcKind = "operation";
+export type NarrativeArcStatus = "developing" | "climax" | "resolution" | "concluded" | "abandoned";
+
+export type NarrativeAct = {
+  name: string;
+  startedTick?: SimTick;
+  endedTick?: SimTick;
+};
+
+export type NarrativeArc = {
+  id: string;
+  kind: NarrativeArcKind;
+  title: string;
+  status: NarrativeArcStatus;
+  startTick: SimTick;
+  endTick?: SimTick;
+  siteId?: SiteId;
+  factionId?: FactionId;
+  operationId?: string;
+  acts: NarrativeAct[];
+  actIndex: number;
+};
+
+export type ChronicleState = {
+  entries: ChronicleEntry[];
+  beats: StoryBeat[];
+  arcs?: NarrativeArc[];
 };
 
 export type TravelState = {
@@ -209,11 +324,14 @@ export type AttemptKind =
   | "patrol"
   | "defend"
   | "intervene"
+  | "recon"
   | "work_farm"
   | "work_fish"
   | "work_hunt"
   | "trade"
+  | "gossip"
   | "steal"
+  | "blackmail"
   | "assault"
   | "kill"
   | "raid"
@@ -261,6 +379,8 @@ export type ScoreContribution = {
     | "base"
     | "need"
     | "trait"
+    | "emotion"
+    | "memory"
     | "belief"
     | "relationship"
     | "siteCondition"
@@ -341,6 +461,10 @@ export type EventKind =
   | "world.anchoring.strength"
   | "world.cult.influence"
   | "world.incident"
+  | "faction.operation.created"
+  | "faction.operation.phase"
+  | "faction.operation.completed"
+  | "faction.operation.aborted"
   | "attempt.recorded";
 
 export type SimEvent = {
@@ -457,6 +581,99 @@ export type Relationship = {
   loyalty: number; // 0..100
 };
 
+// v2: Social debts are lightweight obligations that influence decisions.
+export type SocialDebtKind =
+  | "life_saved"
+  | "injury_caused"
+  | "theft"
+  | "favor_granted"
+  | "betrayal"
+  | "insult"
+  | "hospitality"
+  | "financial";
+
+export type SocialDebt = {
+  id: string;
+  otherNpcId: NpcId;
+  direction: "owes" | "owed"; // I owe them / they owe me
+  debtKind: SocialDebtKind;
+  magnitude: number; // 0..100
+  reason: string;
+  createdTick: SimTick;
+  dueTick?: SimTick;
+  settledTick?: SimTick;
+  settled?: boolean;
+};
+
+// v2: Minimal personal inventory (opt-in).
+export type NpcInventory = {
+  coins: number;
+  food: Partial<Record<FoodType, number>>; // personal stash
+  items?: Record<string, number>; // reserved for later
+};
+
+// v2: Asymmetric knowledge (opt-in).
+export type KnowledgeFactKind =
+  | "identified_cult_member"
+  | "discovered_location"
+  | "saw_crime"
+  | "heard_rumor"
+  | "custom";
+
+export type KnowledgeConfidence = number; // 0..100
+
+export type KnowledgeFact = {
+  id: string;
+  kind: KnowledgeFactKind;
+  subjectId: string; // npcId or siteId depending on kind
+  object?: string;
+  confidence: KnowledgeConfidence;
+  source: "witnessed" | "report" | "rumor" | "deduced";
+  tick: SimTick;
+};
+
+export type SecretKind = "faction_membership" | "crime" | "location" | "plan" | "custom";
+
+export type Secret = {
+  id: string;
+  kind: SecretKind;
+  subjectId: string;
+  details: string;
+  createdTick: SimTick;
+};
+
+export type SecretKnowledge = {
+  secretId: string;
+  confidence: KnowledgeConfidence;
+  learnedTick: SimTick;
+  source: "witnessed" | "report" | "rumor" | "deduced";
+};
+
+export type NpcKnowledge = {
+  facts: KnowledgeFact[]; // bounded
+  secrets: SecretKnowledge[]; // bounded
+};
+
+// v2: Minimal plan state (opt-in).
+export type PlanGoalKind = "get_food" | "stay_safe" | "do_duty" | "custom";
+
+export type PlanStep = {
+  kind: AttemptKind;
+  note?: string;
+};
+
+export type PlanState = {
+  id: string;
+  goal: PlanGoalKind;
+  createdTick: SimTick;
+  steps: PlanStep[];
+  stepIndex: number;
+  reason: string;
+  // v2+: basic robustness fields (optional).
+  failures?: number;
+  lastProgressTick?: SimTick;
+};
+
 export type Belief = {
   subjectId: NpcId;
   predicate: string;
@@ -542,6 +759,9 @@ export type NpcState = {
   // Short/medium-term trauma pressure that influences recruitment susceptibility (0..100).
   trauma: number;
 
+  // v2: emotional state (0..100). Optional for backward compatibility with older snapshots/tests.
+  emotions?: EmotionalState;
+
   // Simple health meter (0..maxHp). Used for assault/heal outcomes.
   hp: number;
   maxHp: number;
@@ -569,6 +789,10 @@ export type NpcState = {
   // knowledge + relationships
   beliefs: Belief[]; // bounded
   relationships: Record<NpcId, Relationship>; // materialized on first interaction or heard-about update
+  debts?: SocialDebt[]; // v2: optional; only used when enabled
+  inventory?: NpcInventory; // v2: optional; only used when enabled
+  knowledge?: NpcKnowledge; // v2: optional; only used when enabled
+  plan?: PlanState; // v2: optional; only used when enabled
 };
 
 export function tickToDay(tick: SimTick): number {

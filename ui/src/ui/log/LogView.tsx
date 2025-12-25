@@ -25,6 +25,7 @@ type OpenResponse = {
   runId: string;
   runDir: string;
   snapshotSummary: { createdAt?: string; tick: number; npcCount: number; siteCount: number };
+  meta?: { startedAt?: string; note?: string; argv?: string[] };
   stats: {
     totalLines: number;
     firstTick?: number;
@@ -77,6 +78,8 @@ export function LogView(props: Props) {
 
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [events, setEvents] = useState<SimEvent[]>([]);
+  const [tickCursor, setTickCursor] = useState<number | null>(null);
+  const [tickWindow, setTickWindow] = useState<number>(48); // +/- hours
 
   const [selectedNpcId, setSelectedNpcId] = useState<string | null>(null);
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
@@ -90,6 +93,9 @@ export function LogView(props: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const world = snapshot?.world ?? null;
+  const chronicleEntries = useMemo(() => (world as any)?.chronicle?.entries ?? [], [world]);
+  const worldOps = useMemo(() => Object.values(((world as any)?.operations ?? {}) as any).slice(), [world]);
+  const chronicleArcs = useMemo(() => (world as any)?.chronicle?.arcs ?? [], [world]);
 
   const membership = useMemo(() => (world ? factionMembershipFromWorld(world) : null), [world]);
   const membershipV2 = useMemo(() => {
@@ -108,6 +114,27 @@ export function LogView(props: Props) {
   const actorCounts = useMemo(() => eventActorCounts(events), [events]);
   const attemptKindCounts = useMemo(() => eventAttemptKindCounts(events), [events]);
   const majorEvents = useMemo(() => events.filter(isMajorEvent).slice(-200), [events]);
+
+  const tickStats = useMemo(() => {
+    const first = openInfo?.stats?.firstTick;
+    const last = openInfo?.stats?.lastTick;
+    return {
+      first: typeof first === "number" ? first : (events.length ? Math.min(...events.map((e) => e.tick)) : 0),
+      last: typeof last === "number" ? last : (events.length ? Math.max(...events.map((e) => e.tick)) : 0)
+    };
+  }, [events, openInfo]);
+
+  useEffect(() => {
+    if (tickCursor !== null) return;
+    if (typeof tickStats.last === "number") setTickCursor(tickStats.last);
+  }, [tickCursor, tickStats.last]);
+
+  const displayEvents = useMemo(() => {
+    if (tickCursor === null) return events;
+    const min = tickCursor - tickWindow;
+    const max = tickCursor + tickWindow;
+    return events.filter((e) => e.tick >= min && e.tick <= max);
+  }, [events, tickCursor, tickWindow]);
 
   const selectedNpc = world && selectedNpcId ? world.npcs[selectedNpcId] : null;
 
@@ -487,8 +514,11 @@ export function LogView(props: Props) {
               <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 8 }}>
                 seed={openInfo.seed} • run={openInfo.runId} • events={openInfo.stats.totalLines} • ticks=
                 {openInfo.stats.firstTick ?? "?"}..{openInfo.stats.lastTick ?? "?"} • snapshotNpcs={openInfo.snapshotSummary.npcCount}
+                {openInfo.meta?.startedAt ? ` • startedAt=${openInfo.meta.startedAt}` : ""}
+                {openInfo.meta?.note ? ` • note=${openInfo.meta.note}` : ""}
               </div>
             ) : null}
+            {/* v2-only: no feature flags */}
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
               <div style={cardStyle}>
@@ -515,6 +545,159 @@ export function LogView(props: Props) {
                   ))
                 ) : (
                   <div style={{ color: "var(--muted)" }}>(none)</div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+              <div style={cardStyle}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+                  <div style={{ fontWeight: 700 }}>World: operations</div>
+                  <div style={{ flex: 1 }} />
+                  <div style={{ color: "var(--muted)", fontSize: 12 }}>({worldOps.length})</div>
+                </div>
+                {!worldOps.length ? (
+                  <div style={{ color: "var(--muted)" }}>(none)</div>
+                ) : (
+                  worldOps
+                    .slice()
+                    .sort((a: any, b: any) => (b.createdTick ?? 0) - (a.createdTick ?? 0))
+                    .slice(0, 8)
+                    .map((o: any) => (
+                      <div key={String(o.id)} style={{ fontSize: 12, marginBottom: 6 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                          <span style={{ color: "var(--muted)" }}>
+                            {String(o.factionId)} • {String(o.type)} • @
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedSiteId(String(o.siteId));
+                                setSelectedNpcId(null);
+                              }}
+                              style={linkBtn}
+                              title="Jump to site"
+                            >
+                              {String(o.siteId)}
+                            </button>
+                          </span>
+                          <span>{String(o.status)}</span>
+                        </div>
+                        <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                          leader=
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedNpcId(String(o.leaderNpcId));
+                              setSelectedSiteId(null);
+                            }}
+                            style={linkBtn}
+                            title="Jump to NPC"
+                          >
+                            {labelNpc(world, String(o.leaderNpcId))}
+                          </button>
+                          {o.targetNpcId ? (
+                            <>
+                              {" "}
+                              target=
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedNpcId(String(o.targetNpcId));
+                                  setSelectedSiteId(null);
+                                }}
+                                style={linkBtn}
+                                title="Jump to NPC"
+                              >
+                                {labelNpc(world, String(o.targetNpcId))}
+                              </button>
+                            </>
+                          ) : null}
+                          {"participantNpcIds" in o && Array.isArray((o as any).participantNpcIds) ? (
+                            <>
+                              {" "}
+                              participants=
+                              {(o as any).participantNpcIds.slice(0, 4).map((id: any, idx: number) => (
+                                <React.Fragment key={String(id)}>
+                                  {idx ? <span style={{ color: "var(--muted)" }}>, </span> : null}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedNpcId(String(id));
+                                      setSelectedSiteId(null);
+                                    }}
+                                    style={linkBtn}
+                                    title="Jump to NPC"
+                                  >
+                                    {labelNpc(world, String(id))}
+                                  </button>
+                                </React.Fragment>
+                              ))}
+                              {(o as any).participantNpcIds.length > 4 ? (
+                                <span style={{ color: "var(--muted)" }}> +{(o as any).participantNpcIds.length - 4}</span>
+                              ) : null}
+                            </>
+                          ) : null}
+                        </div>
+                        {typeof o.phaseIndex === "number" ? (
+                          <div style={{ color: "var(--muted)", fontSize: 12 }}>phase={Number(o.phaseIndex) + 1}</div>
+                        ) : null}
+                      </div>
+                    ))
+                )}
+              </div>
+
+              <div style={cardStyle}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+                  <div style={{ fontWeight: 700 }}>World: chronicle</div>
+                  <div style={{ flex: 1 }} />
+                  <div style={{ color: "var(--muted)", fontSize: 12 }}>({chronicleEntries.length})</div>
+                </div>
+                {!chronicleEntries.length ? (
+                  <div style={{ color: "var(--muted)" }}>(none)</div>
+                ) : (
+                  chronicleEntries
+                    .slice(-8)
+                    .reverse()
+                    .map((e: any) => (
+                      <div key={String(e.id)} style={{ fontSize: 12, marginBottom: 6 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                          <span style={{ color: "var(--muted)" }}>{String(e.kind)}</span>
+                          <span style={{ color: "var(--muted)" }}>t{String(e.tick)}</span>
+                        </div>
+                        <div>{String(e.headline ?? e.description ?? "")}</div>
+                      </div>
+                    ))
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12, marginTop: 12 }}>
+              <div style={cardStyle}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+                  <div style={{ fontWeight: 700 }}>World: arcs</div>
+                  <div style={{ flex: 1 }} />
+                  <div style={{ color: "var(--muted)", fontSize: 12 }}>({chronicleArcs.length})</div>
+                </div>
+                {!chronicleArcs.length ? (
+                  <div style={{ color: "var(--muted)" }}>(none)</div>
+                ) : (
+                  chronicleArcs
+                    .slice()
+                    .sort((a: any, b: any) => (b.startTick ?? 0) - (a.startTick ?? 0))
+                    .slice(0, 8)
+                    .map((a: any) => (
+                      <div key={String(a.id)} style={{ fontSize: 12, marginBottom: 6 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                          <span style={{ color: "var(--muted)" }}>{String(a.title ?? a.kind ?? a.id)}</span>
+                          <span>{String(a.status ?? "")}</span>
+                        </div>
+                        <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                          act {Number(a.actIndex ?? 0) + 1}/{Array.isArray(a.acts) ? a.acts.length : 0}
+                          {Array.isArray(a.acts) && a.acts[Number(a.actIndex ?? 0)]?.name ? ` • ${String(a.acts[Number(a.actIndex ?? 0)]?.name)}` : ""}
+                          {a.operationId ? ` • op=${String(a.operationId)}` : ""}
+                        </div>
+                      </div>
+                    ))
                 )}
               </div>
             </div>
@@ -563,8 +746,38 @@ export function LogView(props: Props) {
           </div>
 
           <div style={{ minHeight: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
+              <div style={{ fontWeight: 700 }}>Timeline</div>
+              <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                t={tickCursor ?? "—"} window=±{tickWindow}h ({displayEvents.length} events)
+              </div>
+              <div style={{ flex: 1 }} />
+              <button onClick={() => setTickCursor((t) => (t === null ? tickStats.last : Math.max(tickStats.first, t - 24)))} style={btnStyle}>
+                ◀ day
+              </button>
+              <button onClick={() => setTickCursor((t) => (t === null ? tickStats.last : Math.min(tickStats.last, t + 24)))} style={btnStyle}>
+                day ▶
+              </button>
+              <select value={tickWindow} onChange={(e) => setTickWindow(Number(e.target.value))} style={selectStyle}>
+                <option value={24}>±24h</option>
+                <option value={48}>±48h</option>
+                <option value={96}>±96h</option>
+                <option value={168}>±7d</option>
+              </select>
+            </div>
+            <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)" }}>
+              <input
+                type="range"
+                min={tickStats.first}
+                max={tickStats.last}
+                step={1}
+                value={tickCursor ?? tickStats.last}
+                onChange={(e) => setTickCursor(Number(e.target.value))}
+                style={{ width: "100%" }}
+              />
+            </div>
             <EventFeed
-              events={events}
+              events={displayEvents}
               world={world}
               selectedNpcId={selectedNpcId}
               selectedSiteId={selectedSiteId}
@@ -664,6 +877,16 @@ function labelNpc(world: WorldState | null, npcId: string): string {
   const n = world?.npcs?.[npcId];
   return n ? `${n.name} (${npcId})` : npcId;
 }
+
+const linkBtn: React.CSSProperties = {
+  background: "transparent",
+  border: "none",
+  padding: 0,
+  margin: 0,
+  color: "rgba(255,255,255,0.85)",
+  cursor: "pointer",
+  textDecoration: "underline"
+};
 
 const panelStyle: React.CSSProperties = {
   border: "1px solid var(--border)",

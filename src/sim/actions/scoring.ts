@@ -7,6 +7,10 @@ import { checkPreconditions } from "./preconditions";
 import { selectTarget } from "./targets";
 import type { ActionDefinition, SiteConditionWeight } from "./types";
 import type { ScoreContribution } from "../types";
+import { getConfig } from "../config";
+import { getMemoryBasedHostility } from "../systems/memory";
+import { getDebtPressure } from "../systems/debts";
+import { getEmotions } from "../systems/emotions";
 
 export type ScoredAction = {
   definition: ActionDefinition;
@@ -47,6 +51,8 @@ export function scoreActions(
   goalModifiers: GoalWeightModifier[] = []
 ): ScoredAction[] {
   const results: ScoredAction[] = [];
+  const memEnabled = true;
+  const relV2Enabled = true;
 
   for (const def of definitions) {
     if (!checkPreconditions(def.preconditions, npc, world)) continue;
@@ -71,6 +77,26 @@ export function scoreActions(
       const delta = v * (weight ?? 0);
       score += delta;
       if (delta !== 0) contributions.push({ kind: "trait", key: trait, delta, note: `v=${v}` });
+    }
+
+    // v2: emotion contributions (0..100)
+    {
+      const emo = getEmotions(npc);
+      // Anger pushes toward violence/crime; fear pushes away from violence; gratitude pushes toward prosocial actions.
+      let delta = 0;
+      if (def.kind === "assault" || def.kind === "kill" || def.kind === "kidnap") {
+        delta += (emo.anger - emo.fear) * 0.25;
+      } else if (def.kind === "steal") {
+        delta += (emo.anger - emo.shame) * 0.15;
+      } else if (def.kind === "heal" || def.kind === "patrol" || def.kind.startsWith("work_")) {
+        delta += emo.gratitude * 0.08;
+      } else if (def.kind === "trade") {
+        delta += (emo.gratitude - emo.fear) * 0.05;
+      }
+      if (delta !== 0) {
+        score += delta;
+        contributions.push({ kind: "emotion", key: "state", delta, note: `anger=${emo.anger.toFixed(0)} fear=${emo.fear.toFixed(0)}` });
+      }
     }
 
     // Site condition contributions.
@@ -127,6 +153,55 @@ export function scoreActions(
                 note: `${rw.op}${rw.threshold} v=${v}`
               });
           }
+        }
+      }
+    }
+
+    // v2: debt-based modifier (only when enabled).
+    // If I owe the target, I'm more likely to engage (trade/cooperate) and less likely to attack.
+    if (relV2Enabled && target) {
+      const pressure = getDebtPressure(npc, target);
+      if (pressure > 0) {
+        let mult = 0;
+        if (def.kind === "trade") mult = 0.2;
+        else if (def.kind === "heal") mult = 0.05;
+        else if (def.kind === "assault" || def.kind === "kill" || def.kind === "kidnap") mult = -0.15;
+
+        if (mult !== 0) {
+          const delta = pressure * mult;
+          score += delta;
+          contributions.push({
+            kind: "obligation",
+            key: "debt",
+            delta,
+            note: `pressure=${pressure.toFixed(1)}`
+          });
+        }
+      }
+    }
+
+    // v2: memory-based modifiers (only when enabled).
+    if (memEnabled && target) {
+      const hostility = getMemoryBasedHostility(npc, target);
+      if (hostility > 0) {
+        // Adjust based on action kind.
+        // - violence/kidnap gets a boost
+        // - trade gets a penalty
+        // - arrest gets only a small boost (duty remains primary driver)
+        let mult = 0;
+        if (def.kind === "assault" || def.kind === "kill" || def.kind === "kidnap") mult = 0.25;
+        else if (def.kind === "arrest") mult = 0.1;
+        else if (def.kind === "trade") mult = -0.2;
+
+        if (mult !== 0) {
+          const delta = hostility * mult;
+          score += delta;
+          contributions.push({
+            kind: "memory",
+            key: "hostility",
+            delta,
+            note: `hostility=${hostility.toFixed(1)}`
+          });
         }
       }
     }

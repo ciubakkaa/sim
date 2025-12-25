@@ -22,7 +22,8 @@ export type SimEvent = {
   id: string;
   tick: number;
   kind: string;
-  visibility: "private" | "public" | "system";
+  // Backend uses: public | local | private | secret (we also keep "system" for older payloads)
+  visibility: "private" | "public" | "local" | "secret" | "system";
   siteId?: string;
   message: string;
   data?: Record<string, unknown>;
@@ -33,6 +34,7 @@ export type ScoreContribution = {
     | "base"
     | "need"
     | "trait"
+    | "memory"
     | "belief"
     | "relationship"
     | "siteCondition"
@@ -43,6 +45,123 @@ export type ScoreContribution = {
   key?: string;
   delta: number;
   note?: string;
+};
+
+export type SocialDebt = {
+  id: string;
+  otherNpcId: string;
+  direction: "owes" | "owed";
+  debtKind: string;
+  magnitude: number;
+  reason: string;
+  createdTick: number;
+  dueTick?: number;
+  settledTick?: number;
+  settled?: boolean;
+};
+
+export type NpcInventory = {
+  coins: number;
+  food: Partial<Record<string, number>>;
+  items?: Record<string, number>;
+};
+
+export type KnowledgeFact = {
+  id: string;
+  kind: string;
+  subjectId: string;
+  object?: string;
+  confidence: number;
+  source: string;
+  tick: number;
+};
+
+export type SecretKnowledge = {
+  secretId: string;
+  confidence: number;
+  learnedTick: number;
+  source: string;
+};
+
+export type NpcKnowledge = {
+  facts: KnowledgeFact[];
+  secrets: SecretKnowledge[];
+};
+
+export type PlanState = {
+  id: string;
+  goal: string;
+  createdTick: number;
+  steps: { kind: string; note?: string }[];
+  stepIndex: number;
+  reason: string;
+};
+
+export type ChronicleEntry = {
+  id: string;
+  tick: number;
+  kind: string;
+  significance: string;
+  siteId?: string;
+  headline: string;
+  description: string;
+  primaryNpcId?: string;
+  otherNpcIds?: string[];
+  sourceEventId?: string;
+};
+
+export type StoryBeat = {
+  id: string;
+  tick: number;
+  kind: string;
+  siteId?: string;
+  primaryNpcId?: string;
+  description: string;
+  sourceEventId?: string;
+};
+
+export type ChronicleState = {
+  entries: ChronicleEntry[];
+  beats: StoryBeat[];
+  arcs?: NarrativeArc[];
+};
+
+export type FactionOperation = {
+  id: string;
+  factionId: string;
+  type: string;
+  siteId: string;
+  targetNpcId?: string;
+  leaderNpcId: string;
+  participantNpcIds: string[];
+  participantRoles?: Record<string, "leader" | "enforcer" | "scout" | "lookout">;
+  createdTick: number;
+  status: string;
+  executeAfterTick?: number;
+  note?: string;
+  phases?: { kind: string; note?: string }[];
+  phaseIndex?: number;
+  failures?: number;
+};
+
+export type NarrativeAct = {
+  name: string;
+  startedTick?: number;
+  endedTick?: number;
+};
+
+export type NarrativeArc = {
+  id: string;
+  kind: string;
+  title: string;
+  status: string;
+  startTick: number;
+  endTick?: number;
+  siteId?: string;
+  factionId?: string;
+  operationId?: string;
+  acts: NarrativeAct[];
+  actIndex: number;
 };
 
 export type AttemptWhy = {
@@ -88,6 +207,9 @@ export type NpcState = {
   intents?: NpcIntent[];
   recentActions?: RecentAction[];
   alive: boolean;
+  death?: { tick: number; cause: string; byNpcId?: string; atSiteId?: string };
+  emotions?: { anger: number; fear: number; grief: number; gratitude: number; pride: number; shame: number; stress: number };
+  episodicMemory?: unknown[];
   homeLocationId?: string;
   local?: { siteId: string; locationId: string };
   localTravel?: {
@@ -109,6 +231,10 @@ export type NpcState = {
   traits: Record<string, number>;
   beliefs: unknown[];
   relationships: Record<string, unknown>;
+  debts?: SocialDebt[];
+  inventory?: NpcInventory;
+  knowledge?: NpcKnowledge;
+  plan?: PlanState;
   travel?: { from: string; to: string; totalKm: number; remainingKm: number; edgeQuality: "road" | "rough" };
   status?: {
     detained?: { untilTick: number; byNpcId: string; atSiteId: string };
@@ -133,6 +259,8 @@ export type WorldState = {
   map: WorldMap;
   sites: Record<string, SiteState | SettlementSiteState>;
   npcs: Record<string, NpcState>;
+  operations?: Record<string, FactionOperation>;
+  chronicle?: ChronicleState;
 };
 
 export type ViewerHelloMessage = {

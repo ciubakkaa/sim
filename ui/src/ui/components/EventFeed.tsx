@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import type { SimEvent, WorldState } from "../../lib/protocol";
-import { getAttempt, getPrimaryActorId } from "../log/metrics";
+import { eventCategory, getAttempt, getPrimaryActorId, type EventCategory } from "../log/metrics";
 import { groupEventsByAction, type ActionGroup } from "../log/grouping";
 
 type Props = {
@@ -21,12 +21,14 @@ function compactKind(kind: string): string {
 export function EventFeed(props: Props) {
   const [textFilter, setTextFilter] = useState("");
   const [kindFilter, setKindFilter] = useState<string>("");
-  const [viewMode, setViewMode] = useState<"action" | "flat" | "kind" | "actor" | "site">("action");
+  const [categoryFilter, setCategoryFilter] = useState<EventCategory | "">("");
+  const [viewMode, setViewMode] = useState<"action" | "flat" | "kind" | "category" | "actor" | "site">("action");
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set());
 
   const filtered = useMemo(() => {
     const tf = textFilter.trim().toLowerCase();
     const kf = kindFilter.trim().toLowerCase();
+    const cf = categoryFilter;
     const site = props.selectedSiteId;
     const npc = props.selectedNpcId;
     const allow = props.actorAllowlist;
@@ -34,6 +36,7 @@ export function EventFeed(props: Props) {
 
     return props.events
       .filter((e) => (kf ? e.kind.toLowerCase().includes(kf) : true))
+      .filter((e) => (cf ? eventCategory(e.kind) === cf : true))
       .filter((e) => (site ? e.siteId === site : true))
       .filter((e) => {
         if (!loc) return true;
@@ -58,7 +61,13 @@ export function EventFeed(props: Props) {
         return allow.has(String(actorId));
       })
       .filter((e) => (tf ? `${e.kind} ${e.message} ${e.siteId ?? ""}`.toLowerCase().includes(tf) : true));
-  }, [kindFilter, props.actorAllowlist, props.events, props.locationIdFilter, props.selectedNpcId, props.selectedSiteId, textFilter]);
+  }, [categoryFilter, kindFilter, props.actorAllowlist, props.events, props.locationIdFilter, props.selectedNpcId, props.selectedSiteId, textFilter]);
+
+  const categories = useMemo(() => {
+    const s = new Set<EventCategory>();
+    for (const e of props.events) s.add(eventCategory(e.kind));
+    return Array.from(s).sort();
+  }, [props.events]);
 
   const kinds = useMemo(() => {
     const s = new Set<string>();
@@ -66,8 +75,9 @@ export function EventFeed(props: Props) {
     return Array.from(s).sort();
   }, [props.events]);
 
-  const groupKeyLabel = (key: string, mode: "kind" | "actor" | "site") => {
+  const groupKeyLabel = (key: string, mode: "kind" | "category" | "actor" | "site") => {
     if (mode === "kind") return key;
+    if (mode === "category") return key || "(unknown)";
     if (mode === "site") return key ? `@${key}` : "(no site)";
     // actor
     const n = key ? props.world?.npcs?.[key]?.name : undefined;
@@ -173,8 +183,17 @@ export function EventFeed(props: Props) {
           <option value="action">Grouped: action</option>
           <option value="flat">Flat</option>
           <option value="kind">Grouped: kind</option>
+          <option value="category">Grouped: category</option>
           <option value="actor">Grouped: actor</option>
           <option value="site">Grouped: site</option>
+        </select>
+        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value as any)} style={selectStyle}>
+          <option value="">All categories</option>
+          {categories.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
         </select>
         <select value={kindFilter} onChange={(e) => setKindFilter(e.target.value)} style={selectStyle}>
           <option value="">All kinds</option>
@@ -269,13 +288,15 @@ export function EventFeed(props: Props) {
                 );
               }
 
-              // Grouped: kind/actor/site (full list, no ungrouped bucket).
+              // Grouped: kind/category/actor/site (full list, no ungrouped bucket).
               const mode = viewMode;
               const groupedEvents = new Map<string, SimEvent[]>();
               for (const e of filtered) {
                 const key =
                   mode === "kind"
                     ? e.kind
+                    : mode === "category"
+                      ? eventCategory(e.kind)
                     : mode === "site"
                       ? e.siteId ?? ""
                       : getPrimaryActorId(e) ?? "";
@@ -288,7 +309,7 @@ export function EventFeed(props: Props) {
                 .map(([key, evs]) => ({
                   id: `${mode}:${key || "(none)"}`,
                   key,
-                  label: groupKeyLabel(key, mode),
+                  label: groupKeyLabel(String(key), mode),
                   startTick: evs[0]?.tick ?? 0,
                   endTick: evs[evs.length - 1]?.tick ?? 0,
                   events: evs

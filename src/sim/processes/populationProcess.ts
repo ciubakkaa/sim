@@ -7,6 +7,7 @@ import { tickToDay, tickToHourOfDay } from "../types";
 import type { ProcessContext, ProcessResult } from "./types";
 import { defaultTraits, emptyNeeds } from "../npcs";
 import { baselineRelationship } from "../relationships";
+import { emptyEmotions } from "../systems/emotions";
 
 function isSettlement(site: unknown): site is SettlementSiteState {
   return Boolean(site && (site as SettlementSiteState).kind === "settlement");
@@ -148,6 +149,7 @@ export function applyPopulationProcessDaily(world: WorldState, ctx: ProcessConte
           alive: true,
           cult: { member: false, role: "none" },
           trauma: clamp(10 + ctx.rng.int(0, 15), 0, 100),
+          emotions: emptyEmotions(),
           hp: 100,
           maxHp: 100,
           traits,

@@ -5,7 +5,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { SimRuntime } from "./runtime";
 import type { ControlAction, ViewerServerMessage } from "./protocol";
-import { defaultWorldsBaseDir, listSeedRunIds, persistedRunPaths, readRunSnapshot } from "./persist";
+import { defaultWorldsBaseDir, listSeedRunIds, persistedRunPaths, readRunMeta, readRunSnapshot } from "./persist";
 
 export type ViewerServerOptions = {
   port: number;
@@ -247,6 +247,15 @@ export function startViewerServer(opts: ViewerServerOptions): http.Server {
         return;
       }
 
+      let meta: any = undefined;
+      if (fs.existsSync(p.metaPath)) {
+        try {
+          meta = readRunMeta(p.metaPath);
+        } catch {
+          // ignore bad meta
+        }
+      }
+
       let stats: any;
       try {
         stats = await readEventLogStats(p.eventsPath);
@@ -268,6 +277,7 @@ export function startViewerServer(opts: ViewerServerOptions): http.Server {
           runId: p.runId,
           runDir: p.runDir,
           snapshotSummary: { createdAt: snapshot?.createdAt, tick: snapshot?.world?.tick ?? 0, npcCount, siteCount },
+          meta,
           stats
         },
         corsOrigin
@@ -386,7 +396,6 @@ export function startViewerServer(opts: ViewerServerOptions): http.Server {
       if (action === "reset") runtime.reset();
       if (action === "setSpeed") runtime.setSpeed(body.msPerTick);
       if (action === "setSeed") runtime.setSeed(body.seed);
-
       const st = runtime.state;
       writeJson(
         res,

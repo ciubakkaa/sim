@@ -4,6 +4,7 @@ import type { SimEvent, TickResult, WorldState } from "../sim/types";
 import { tickToDay, tickToHourOfDay } from "../sim/types";
 import type { MapLayout, ViewerSettings, ViewerServerMessage } from "./protocol";
 import { computeDeterministicLayout } from "./layout";
+import { createConfig, setConfig } from "../sim/config";
 
 export type RuntimeOptions = {
   seed: number;
@@ -36,9 +37,16 @@ export class SimRuntime {
       seed: opts.seed,
       msPerTick: opts.msPerTick,
       paused: opts.paused ?? true,
-      maxCatchupTicks: opts.maxCatchupTicks ?? 5
+      maxCatchupTicks: opts.maxCatchupTicks ?? 5,
     };
-    this._settings = { seed: this.opts.seed, paused: this.opts.paused, msPerTick: this.opts.msPerTick };
+    this._settings = {
+      seed: this.opts.seed,
+      paused: this.opts.paused,
+      msPerTick: this.opts.msPerTick,
+    };
+
+    // v2-only: simulation features are always enabled; viewer v2 settings are UI-only.
+
     this._world = createWorld(this._settings.seed);
     this._layout = computeDeterministicLayout(this._world.map, this._settings.seed);
   }

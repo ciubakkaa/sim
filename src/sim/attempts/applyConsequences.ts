@@ -1,5 +1,5 @@
 import type { AttemptConsequence } from "./consequences";
-import type { FoodLot, NpcState, SettlementSiteState, SiteState, WorldState } from "../types";
+import type { FoodLot, NpcState, SettlementSiteState, SiteState, WorldState, SocialDebt, KnowledgeFact, NpcKnowledge } from "../types";
 import { addRumor } from "./rumors";
 import { clamp } from "../util";
 import { addBelief } from "../beliefs";
@@ -90,6 +90,27 @@ export function applyConsequences(world: WorldState, consequences: AttemptConseq
       const scaled = scaleDeltaByConfidence(c.delta, c.confidence);
       const updated = applyRelationshipDelta(n, c.otherNpcId, w, scaled);
       w = { ...w, npcs: { ...w.npcs, [c.npcId]: updated } };
+      continue;
+    }
+
+    if (c.kind === "npc.debt.add") {
+      const n = w.npcs[c.npcId];
+      if (!n) continue;
+      const existing: SocialDebt[] = (n.debts ?? []).slice();
+      existing.push(c.debt);
+      // Keep bounded to avoid growth.
+      const nextDebts = existing.length > 50 ? existing.slice(existing.length - 50) : existing;
+      w = { ...w, npcs: { ...w.npcs, [c.npcId]: { ...n, debts: nextDebts } } };
+      continue;
+    }
+
+    if (c.kind === "npc.knowledge.fact.add") {
+      const n = w.npcs[c.npcId];
+      if (!n) continue;
+      const k: NpcKnowledge = n.knowledge ?? { facts: [], secrets: [] };
+      const facts: KnowledgeFact[] = [...(k.facts ?? []), c.fact];
+      const nextFacts = facts.length > 120 ? facts.slice(facts.length - 120) : facts;
+      w = { ...w, npcs: { ...w.npcs, [c.npcId]: { ...n, knowledge: { ...k, facts: nextFacts } } } };
       continue;
     }
 

@@ -3,6 +3,7 @@ import { defaultTraits, emptyNeeds } from "./npcs";
 import type { FoodStock, NpcCategory, NpcId, NpcState, SettlementSiteState, SiteId, SiteState, WorldMap, WorldState } from "./types";
 import { generateSettlementInterior } from "./settlements/generateInterior";
 import { clamp } from "./util";
+import { emptyEmotions } from "./systems/emotions";
 
 function emptyFood(): FoodStock {
   return { grain: [], fish: [], meat: [] };
@@ -207,6 +208,7 @@ export function createWorld(seed: number): WorldState {
         joinedTick: isConcord ? 0 : undefined
       },
       trauma: 0,
+      emotions: emptyEmotions(),
       hp: 100,
       maxHp: 100,
       traits: defaultTraits(rng, traitBias),
@@ -377,13 +379,18 @@ export function createWorld(seed: number): WorldState {
     }
   }
 
-  return {
+  const world: WorldState = {
     seed,
     tick: 0,
     map,
     sites,
     npcs
   };
+
+  // v2-only: derived entity registry is always present.
+  world.entities = world.npcs as any;
+
+  return world;
 }
 
 function fnvSite(siteId: string): number {

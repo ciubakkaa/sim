@@ -47,8 +47,13 @@ export function NpcPanel(props: Props) {
   const selected = world && props.selectedNpcId ? world.npcs[props.selectedNpcId] : null;
   const selectedTopNeed = selected ? topNeed(selected) : null;
   const goals = selected?.goals ?? [];
-  const intents = selected?.intents ?? [];
   const recent = selected?.recentActions ?? [];
+  const debts = (selected as any)?.debts as any[] | undefined;
+  const inv = (selected as any)?.inventory as any | undefined;
+  const knowledge = (selected as any)?.knowledge as any | undefined;
+  const plan = (selected as any)?.plan as any | undefined;
+  const emotions = (selected as any)?.emotions as any | undefined;
+  const memories = (selected as any)?.episodicMemory as any[] | undefined;
 
   return (
     <div style={{ height: "100%", display: "grid", gridTemplateRows: "52px 1fr 320px", minHeight: 0 }}>
@@ -120,6 +125,29 @@ export function NpcPanel(props: Props) {
               <div style={{ color: selected.alive ? "var(--good)" : "var(--muted)" }}>{selected.alive ? "Alive" : "Dead"}</div>
             </div>
 
+            {!selected.alive && selected.death ? (
+              <div style={{ color: "rgba(255,255,255,0.8)", fontSize: 12 }}>
+                died t{selected.death.tick} • cause={String(selected.death.cause)}
+                {selected.death.atSiteId ? ` • at=${String(selected.death.atSiteId)}` : ""}
+                {selected.death.byNpcId ? (
+                  <>
+                    {" "}
+                    • by=
+                    <button
+                      type="button"
+                      onClick={() => props.onSelectNpcId(String(selected.death?.byNpcId))}
+                      style={{ background: "transparent", border: "none", padding: 0, margin: 0, color: "rgba(255,255,255,0.85)", cursor: "pointer", textDecoration: "underline" }}
+                      title="Jump to killer"
+                    >
+                      {world?.npcs?.[String(selected.death.byNpcId)]?.name ?? String(selected.death.byNpcId)}
+                    </button>
+                  </>
+                ) : (
+                  ""
+                )}
+              </div>
+            ) : null}
+
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", color: "var(--muted)", fontSize: 12 }}>
               <span>site={selected.siteId}</span>
               {selected.local?.locationId ? <span>loc={selected.local.locationId.split(":").slice(-1)[0]}</span> : null}
@@ -131,6 +159,8 @@ export function NpcPanel(props: Props) {
               <span>trauma={Math.round(selected.trauma)}</span>
               <span>notability={Math.round(selected.notability)}</span>
               <span>beliefs={selected.beliefs?.length ?? 0}</span>
+              {inv ? <span>coins={Math.round(Number(inv.coins ?? 0))}</span> : null}
+              {debts?.length ? <span>debts={debts.length}</span> : null}
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, minHeight: 0 }}>
@@ -164,6 +194,24 @@ export function NpcPanel(props: Props) {
                 <div style={{ color: "var(--muted)", fontSize: 12, marginTop: 8 }}>
                   status={npcNowLabel(selected, tick)}
                 </div>
+
+                <div style={{ fontWeight: 700, margin: "14px 0 8px" }}>Emotions</div>
+                {!emotions ? (
+                  <div style={{ color: "var(--muted)", fontSize: 12 }}>(none)</div>
+                ) : (
+                  (["stress", "fear", "anger", "grief", "gratitude", "pride", "shame"] as const).map((k) => {
+                    const v = clamp(Number(emotions[k] ?? 0), 0, 100);
+                    return (
+                      <div key={k} style={{ display: "grid", gridTemplateColumns: "90px 1fr 34px", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                        <div style={{ color: "var(--muted)", fontSize: 12 }}>{k}</div>
+                        <div style={{ height: 8, background: "rgba(255,255,255,0.08)", borderRadius: 999, overflow: "hidden" }}>
+                          <div style={{ width: `${v}%`, height: "100%", background: v >= 70 ? "var(--warn)" : "rgba(255,255,255,0.55)" }} />
+                        </div>
+                        <div style={{ color: "var(--muted)", fontSize: 12, textAlign: "right" }}>{Math.round(v)}</div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
 
@@ -187,24 +235,21 @@ export function NpcPanel(props: Props) {
               </div>
 
               <div style={{ minHeight: 0, overflow: "auto" }}>
-                <div style={{ fontWeight: 700, marginBottom: 8 }}>Intents</div>
-                {intents.length === 0 ? (
+                <div style={{ fontWeight: 700, marginBottom: 8 }}>Memories</div>
+                {!memories?.length ? (
                   <div style={{ color: "var(--muted)", fontSize: 12 }}>(none)</div>
                 ) : (
-                  intents
+                  memories
                     .slice()
-                    .sort((a: any, b: any) => (b.intensity ?? 0) - (a.intensity ?? 0))
+                    .sort((a: any, b: any) => (b.tick ?? 0) - (a.tick ?? 0))
                     .slice(0, 8)
-                    .map((it: any) => (
-                      <div key={it.id} style={{ marginBottom: 6 }}>
+                    .map((m: any) => (
+                      <div key={String(m.id)} style={{ marginBottom: 6 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                          <div style={{ color: "var(--text)", fontSize: 12 }}>{it.kind}</div>
-                          <div style={{ color: "var(--muted)", fontSize: 12 }}>{Math.round(Number(it.intensity ?? 0))}</div>
+                          <div style={{ color: "var(--text)", fontSize: 12 }}>{String(m.eventType)}</div>
+                          <div style={{ color: "var(--muted)", fontSize: 12 }}>t{String(m.tick)}</div>
                         </div>
-                        {it.whyText ? <div style={{ color: "rgba(255,255,255,0.65)", fontSize: 12 }}>{it.whyText}</div> : null}
-                        {typeof it.executeAtTick === "number" ? (
-                          <div style={{ color: "var(--muted)", fontSize: 12 }}>exec@t{it.executeAtTick}</div>
-                        ) : null}
+                        {m.description ? <div style={{ color: "rgba(255,255,255,0.65)", fontSize: 12 }}>{String(m.description)}</div> : null}
                       </div>
                     ))
                 )}
@@ -231,6 +276,115 @@ export function NpcPanel(props: Props) {
                         ) : null}
                       </div>
                     ))
+                )}
+              </div>
+            </div>
+
+            {/* Simulation state (plan/inventory/debts/knowledge) */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, minHeight: 0 }}>
+              <div style={{ minHeight: 0, overflow: "auto" }}>
+                <div style={{ fontWeight: 700, marginBottom: 8 }}>Plan</div>
+                {!plan ? (
+                  <div style={{ color: "var(--muted)", fontSize: 12 }}>(none)</div>
+                ) : (
+                  <div style={{ display: "grid", gap: 6 }}>
+                    <div style={{ color: "var(--muted)", fontSize: 12 }}>goal={String(plan.goal)}</div>
+                    <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                      step {Number(plan.stepIndex ?? 0) + 1}/{Array.isArray(plan.steps) ? plan.steps.length : 0}
+                    </div>
+                    {plan.reason ? <div style={{ color: "rgba(255,255,255,0.75)", fontSize: 12 }}>{String(plan.reason)}</div> : null}
+                    {Array.isArray(plan.steps) ? (
+                      <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                        steps:{" "}
+                        {plan.steps
+                          .slice(0, 6)
+                          .map((s: any, i: number) => `${i === Number(plan.stepIndex ?? 0) ? "▶" : ""}${s.kind}`)
+                          .join(" → ")}
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+
+                <div style={{ fontWeight: 700, margin: "14px 0 8px" }}>Inventory</div>
+                {!inv ? (
+                  <div style={{ color: "var(--muted)", fontSize: 12 }}>(none)</div>
+                ) : (
+                  <div style={{ display: "grid", gap: 6 }}>
+                    <div style={{ color: "var(--muted)", fontSize: 12 }}>coins={Math.round(Number(inv.coins ?? 0))}</div>
+                    <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                      food:{" "}
+                      {inv.food
+                        ? Object.entries(inv.food)
+                            .map(([k, v]) => `${k}=${Math.round(Number(v))}`)
+                            .join(", ")
+                        : "(none)"}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ minHeight: 0, overflow: "auto" }}>
+                <div style={{ fontWeight: 700, marginBottom: 8 }}>Debts</div>
+                {!debts?.length ? (
+                  <div style={{ color: "var(--muted)", fontSize: 12 }}>(none)</div>
+                ) : (
+                  (debts as any[])
+                    .slice()
+                    .sort((a: any, b: any) => (b.magnitude ?? 0) - (a.magnitude ?? 0))
+                    .slice(0, 8)
+                    .map((d: any) => (
+                      <div key={String(d.id)} style={{ marginBottom: 6 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                          <div style={{ color: "var(--text)", fontSize: 12 }}>
+                            {String(d.direction)} {String(d.otherNpcId)}
+                          </div>
+                          <div style={{ color: "var(--muted)", fontSize: 12 }}>{Math.round(Number(d.magnitude ?? 0))}</div>
+                        </div>
+                        {d.reason ? <div style={{ color: "rgba(255,255,255,0.65)", fontSize: 12 }}>{String(d.reason)}</div> : null}
+                      </div>
+                    ))
+                )}
+
+                <div style={{ fontWeight: 700, margin: "14px 0 8px" }}>Knowledge</div>
+                {!knowledge?.facts?.length && !knowledge?.secrets?.length ? (
+                  <div style={{ color: "var(--muted)", fontSize: 12 }}>(none)</div>
+                ) : (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {knowledge?.facts?.length ? (
+                      <div style={{ display: "grid", gap: 6 }}>
+                        <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 700 }}>Facts</div>
+                        {knowledge.facts
+                          .slice()
+                          .sort((a: any, b: any) => (b.confidence ?? 0) - (a.confidence ?? 0) || (b.tick ?? 0) - (a.tick ?? 0))
+                          .slice(0, 8)
+                          .map((f: any) => (
+                            <div key={String(f.id)} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                              <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                                {String(f.kind)} {String(f.subjectId)}
+                                {f.object ? <span style={{ color: "rgba(255,255,255,0.7)" }}> • {String(f.object)}</span> : null}
+                              </div>
+                              <div style={{ color: "var(--muted)", fontSize: 12 }}>{Math.round(Number(f.confidence ?? 0))}</div>
+                            </div>
+                          ))}
+                      </div>
+                    ) : null}
+
+                    {knowledge?.secrets?.length ? (
+                      <div style={{ display: "grid", gap: 6 }}>
+                        <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 700 }}>Secrets</div>
+                        {knowledge.secrets
+                          .slice()
+                          .sort((a: any, b: any) => (b.confidence ?? 0) - (a.confidence ?? 0) || (b.learnedTick ?? 0) - (a.learnedTick ?? 0))
+                          .slice(0, 8)
+                          .map((s: any) => (
+                            <div key={String(s.secretId)} style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                              <div style={{ color: "var(--muted)", fontSize: 12 }}>{String(s.secretId)}</div>
+                              <div style={{ color: "var(--muted)", fontSize: 12 }}>{Math.round(Number(s.confidence ?? 0))}</div>
+                            </div>
+                          ))}
+                      </div>
+                    ) : null}
+                  </div>
                 )}
               </div>
             </div>

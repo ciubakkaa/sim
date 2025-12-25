@@ -10,9 +10,12 @@ import {
   resolveDefend,
   resolveHeal,
   resolveInvestigate,
+  resolveGossip,
+  resolveBlackmail,
   resolveIntervene,
   resolvePatrol,
   resolvePreach,
+  resolveRecon,
   resolveSteal,
   resolveTravel,
   resolveWork
@@ -134,12 +137,15 @@ export function resolveAndApplyAttempt(
   if (attempt.kind === "travel") return wrap(resolveTravel(nextWorld, attemptWithLocation, ctx));
   if (attempt.kind === "patrol") return wrap(resolvePatrol(nextWorld, attemptWithLocation, ctx));
   if (attempt.kind === "defend") return wrap(resolveDefend(nextWorld, attemptWithLocation, ctx));
+  if (attempt.kind === "recon") return wrap(resolveRecon(nextWorld, attemptWithLocation, ctx));
   if (attempt.kind === "work_farm" || attempt.kind === "work_fish" || attempt.kind === "work_hunt")
     return wrap(resolveWork(nextWorld, attemptWithLocation, ctx));
   if (attempt.kind === "heal") return wrap(resolveHeal(nextWorld, attemptWithLocation, ctx));
   if (attempt.kind === "preach_fixed_path") return wrap(resolvePreach(nextWorld, attemptWithLocation, ctx));
   if (attempt.kind === "investigate") return wrap(resolveInvestigate(nextWorld, attemptWithLocation, ctx));
+  if (attempt.kind === "gossip") return wrap(resolveGossip(nextWorld, attemptWithLocation, ctx));
   if (attempt.kind === "steal") return wrap(resolveSteal(nextWorld, attemptWithLocation, ctx));
+  if (attempt.kind === "blackmail") return wrap(resolveBlackmail(nextWorld, attemptWithLocation, ctx));
   if (attempt.kind === "intervene") return wrap(resolveIntervene(nextWorld, attemptWithLocation, ctx));
 
   if (attempt.kind === "trade") return wrap(resolveTrade(nextWorld, attemptWithLocation, ctx));

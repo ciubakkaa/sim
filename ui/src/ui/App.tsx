@@ -4,6 +4,7 @@ import { EventFeed } from "./components/EventFeed";
 import { MapCanvas } from "./components/MapCanvas";
 import { NpcPanel } from "./components/NpcPanel";
 import { BuildingPanel } from "./components/BuildingPanel";
+import { WorldPanel } from "./components/WorldPanel";
 import { LogView } from "./log/LogView";
 import "./theme.css";
 
@@ -35,6 +36,7 @@ export function App() {
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
   const [focusNpcId, setFocusNpcId] = useState<string | null>(null);
   const [showEvents, setShowEvents] = useState(false);
+  const [mapOverlay, setMapOverlay] = useState<"none" | "unrest" | "cultInfluence" | "eclipsingPressure">("none");
 
   const esRef = useRef<EventSource | null>(null);
 
@@ -240,6 +242,17 @@ export function App() {
           <button onClick={() => setShowEvents((v) => !v)} style={btnStyle}>
             {showEvents ? "Hide Events" : "Events"}
           </button>
+          <select
+            value={mapOverlay}
+            onChange={(e) => setMapOverlay(e.target.value as any)}
+            style={{ ...btnStyle, padding: "8px 10px" }}
+            title="Map overlay"
+          >
+            <option value="none">Overlay: none</option>
+            <option value="unrest">Overlay: unrest</option>
+            <option value="cultInfluence">Overlay: cult</option>
+            <option value="eclipsingPressure">Overlay: pressure</option>
+          </select>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 240 }}>
@@ -261,7 +274,7 @@ export function App() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 12, minHeight: 0 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 12, minHeight: 0 }}>
         <div style={{ display: "grid", gridTemplateRows: "1fr auto", gap: 12, minHeight: 0 }}>
           <div style={panelStyle}>
             <MapCanvas
@@ -271,6 +284,7 @@ export function App() {
               selectedSiteId={selectedSiteId}
               selectedLocationId={selectedLocationId}
               focusNpcId={focusNpcId}
+              overlayMode={mapOverlay}
               onSelectNpcId={setSelectedNpcId}
               onSelectSiteId={(id) => {
                 setSelectedSiteId(id);
@@ -287,7 +301,7 @@ export function App() {
           ) : null}
         </div>
 
-        <div style={{ display: "grid", gridTemplateRows: "1fr 280px", gap: 12, minHeight: 0 }}>
+            <div style={{ display: "grid", gridTemplateRows: "1fr 240px 240px", gap: 12, minHeight: 0 }}>
           <div style={panelStyle}>
             <NpcPanel world={world} selectedNpcId={selectedNpcId} onSelectNpcId={setSelectedNpcId} />
           </div>
@@ -305,6 +319,20 @@ export function App() {
               }}
             />
           </div>
+              <div style={panelStyle}>
+                <WorldPanel
+                  world={world}
+                  onSelectNpcId={(npcId) => {
+                    setSelectedNpcId(npcId);
+                    setFocusNpcId(npcId);
+                    window.setTimeout(() => setFocusNpcId(null), 200);
+                  }}
+                  onSelectSiteId={(id) => {
+                    setSelectedSiteId(id);
+                    if (id !== selectedSiteId) setSelectedLocationId(null);
+                  }}
+                />
+              </div>
         </div>
       </div>
     </div>

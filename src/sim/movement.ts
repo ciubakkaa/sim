@@ -9,6 +9,7 @@ import { shareBeliefsOnArrival } from "./attempts/rumors";
 import { clamp } from "./util";
 import type { AttemptConsequence } from "./attempts/consequences";
 import { applyConsequences } from "./attempts/applyConsequences";
+import { seasonAtTick, travelSpeedMultiplier } from "./seasons";
 // richer consequences are applied via applyConsequences (belief/relationship helpers are invoked there)
 
 export function isNpcTraveling(npc: NpcState): boolean {
@@ -18,15 +19,15 @@ export function isNpcTraveling(npc: NpcState): boolean {
 function kmThisHour(
   hourOfDay: number,
   edgeQuality: TravelState["edgeQuality"],
-  opts: { hp: number; maxHp: number }
+  opts: { hp: number; maxHp: number; seasonMult: number }
 ): number {
-  if (edgeQuality === "rough") return 2;
   const isDay = hourOfDay >= DEFAULT_DAYLIGHT_HOURS.start && hourOfDay < DEFAULT_DAYLIGHT_HOURS.end;
-  const base = isDay ? 4 : 2;
+  const roadBase = isDay ? 4 : 2;
+  const base = edgeQuality === "rough" ? (isDay ? 2 : 1) : roadBase;
   // Simple realism: badly injured (low HP) travelers are slower, without needing the full injury system yet.
   const hpRatio = opts.maxHp > 0 ? opts.hp / opts.maxHp : 1;
   const injurySlow = hpRatio < 0.35 ? 0.65 : hpRatio < 0.6 ? 0.8 : 1;
-  return base * injurySlow;
+  return base * injurySlow * (opts.seasonMult ?? 1);
 }
 
 export function startTravel(
@@ -104,7 +105,8 @@ export function progressTravelHourly(
     const avgUnrest = (fromUnrest + toUnrest) / 2;
     const avgPressure = (fromPressure + toPressure) / 2;
 
-    let kmStep = kmThisHour(hour, tr.edgeQuality, { hp: npc.hp, maxHp: npc.maxHp });
+    const seasonMult = travelSpeedMultiplier(seasonAtTick(world.tick));
+    let kmStep = kmThisHour(hour, tr.edgeQuality, { hp: npc.hp, maxHp: npc.maxHp, seasonMult });
     let encounter: { kind: TravelEncounterKind; kmMultiplier: number; consequences: AttemptConsequence[] } | undefined;
 
     const chance = encounterChancePerHour(hour, tr.edgeQuality, { avgUnrest, avgPressure });

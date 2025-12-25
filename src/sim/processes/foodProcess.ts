@@ -4,6 +4,7 @@ import { addFoodLot, consumeFoodHourly, spoilFoodLots, totalFood } from "../food
 import { clamp } from "../util";
 import type { FoodType, SettlementSiteState, SimEvent, WorldState } from "../types";
 import { tickToDay } from "../types";
+import { foodProductionMultiplier, seasonAtTick } from "../seasons";
 import type { ProcessContext, ProcessResult } from "./types";
 
 function isSettlement(site: unknown): site is SettlementSiteState {
@@ -62,6 +63,8 @@ export function applyFoodProcessHourly(world: WorldState, ctx: ProcessContext): 
       const s = nextWorld.sites[siteId] as SettlementSiteState;
       let produced: Partial<Record<FoodType, number>> = {};
       let updated = s;
+      const season = seasonAtTick(nextWorld.tick);
+      const mult = foodProductionMultiplier(season);
 
       const noLaborPenalty = (type: FoodType, amt: number) => {
         // Task 10: 30% reduction when nobody worked that domain since last dawn.
@@ -69,9 +72,9 @@ export function applyFoodProcessHourly(world: WorldState, ctx: ProcessContext): 
         return worked > 0 ? amt : Math.max(0, Math.round(amt * 0.7));
       };
 
-      const baseGrain = Math.max(0, Math.round(s.productionPerDay.grain * s.fieldsCondition));
-      const baseFish = Math.max(0, Math.round(s.productionPerDay.fish));
-      const baseMeat = Math.max(0, Math.round(s.productionPerDay.meat));
+      const baseGrain = Math.max(0, Math.round(s.productionPerDay.grain * s.fieldsCondition * mult.grain));
+      const baseFish = Math.max(0, Math.round(s.productionPerDay.fish * mult.fish));
+      const baseMeat = Math.max(0, Math.round(s.productionPerDay.meat * mult.meat));
 
       const prodGrain = noLaborPenalty("grain", baseGrain);
       const prodFish = noLaborPenalty("fish", baseFish);
@@ -101,7 +104,7 @@ export function applyFoodProcessHourly(world: WorldState, ctx: ProcessContext): 
         visibility: "system",
         siteId,
         message: `Food produced at ${updated.name}`,
-        data: { produced, fieldsCondition: updated.fieldsCondition, laborWorkedToday: s.laborWorkedToday }
+        data: { produced, fieldsCondition: updated.fieldsCondition, laborWorkedToday: s.laborWorkedToday, season }
       });
 
       // Reset labor tracking for the next day window.

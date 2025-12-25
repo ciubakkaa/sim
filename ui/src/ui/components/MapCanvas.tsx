@@ -8,6 +8,7 @@ type Props = {
   selectedSiteId: string | null;
   selectedLocationId: string | null;
   focusNpcId: string | null;
+  overlayMode?: "none" | "unrest" | "cultInfluence" | "eclipsingPressure";
   onSelectNpcId: (id: string | null) => void;
   onSelectSiteId: (id: string | null) => void;
   onSelectLocationId: (id: string | null) => void;
@@ -134,6 +135,15 @@ function drawLabel(ctx: CanvasRenderingContext2D, text: string, x: number, y: nu
   ctx.fillStyle = "rgba(255,255,255,0.88)";
   ctx.fillText(text, x, y);
   ctx.restore();
+}
+
+function heatColor(v01: number): string {
+  const v = clamp(v01, 0, 1);
+  // Blue -> yellow -> red
+  const h = v < 0.5 ? 210 - v * 2 * 70 : 70 - (v - 0.5) * 2 * 70;
+  const s = 90;
+  const l = 55;
+  return `hsl(${h} ${s}% ${l}%)`;
 }
 
 type NpcPathAnim = {
@@ -437,6 +447,20 @@ export function MapCanvas(props: Props) {
             ctx.rect(p.x - r, p.y - r, r * 2, r * 2);
           }
           ctx.fill();
+
+          // Overlay ring (settlements only)
+          if (s.kind === "settlement" && props.overlayMode && props.overlayMode !== "none") {
+            const full: any = (world.sites as any)[s.id];
+            const raw = typeof full?.[props.overlayMode] === "number" ? Number(full[props.overlayMode]) : 0;
+            const v01 = clamp(raw / 100, 0, 1);
+            ctx.globalAlpha = 0.55;
+            ctx.strokeStyle = heatColor(v01);
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r + 4, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+          }
 
           ctx.globalAlpha = 1;
           ctx.strokeStyle = isSel ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.20)";

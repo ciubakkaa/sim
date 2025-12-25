@@ -3,6 +3,9 @@ import { tickToDay } from "../types";
 import { applyRelationshipDelta, relationshipDeltaFromRumor, scaleDeltaByConfidence } from "../relationships";
 import { isNpcTraveling } from "../movement";
 import { recordDid } from "../beliefs";
+import { getConfig } from "../config";
+import { getNeighbors } from "../map";
+import type { Rng } from "../rng";
 
 export function isSettlement(site: any): site is SettlementSiteState {
   return Boolean(site && site.kind === "settlement");
@@ -86,6 +89,86 @@ export function shareBeliefsOnArrival(npc: NpcState, site: SettlementSiteState, 
     confidence: conf,
     label
   });
+}
+
+function mutateRumorLabel(r: SiteRumor): string {
+  // Very lightweight mutation: soften certainty and/or remove some details.
+  const base = r.label || "Rumor";
+  if (base.toLowerCase().includes("rumor:")) return base.replace(/rumor:\s*/i, "Rumor: maybe ");
+  if (base.toLowerCase().includes("gossip:")) return base.replace(/gossip:\s*/i, "Gossip: maybe ");
+  return `Maybe: ${base}`;
+}
+
+export function decayRumorsDaily(world: WorldState): WorldState {
+  const cfg = getConfig();
+
+  const nowDay = tickToDay(world.tick);
+  const decay = Math.max(0, Math.round(10 * (cfg.tuning.rumorDecayPerDay ?? 0.5)));
+  const maxSiteRumors = 120;
+
+  let changed = false;
+  const nextSites: typeof world.sites = { ...world.sites };
+
+  for (const [id, s] of Object.entries(world.sites)) {
+    if (!isSettlement(s) || !s.rumors?.length) continue;
+    const nextRumors: SiteRumor[] = [];
+    for (const r of s.rumors) {
+      const ageDays = nowDay - tickToDay(r.tick);
+      if (ageDays > 14) continue;
+      const confidence = Math.max(0, Math.round(r.confidence - decay * Math.max(1, ageDays)));
+      if (confidence < 10) continue;
+      nextRumors.push({ ...r, confidence });
+    }
+    const bounded = nextRumors.length > maxSiteRumors ? nextRumors.slice(nextRumors.length - maxSiteRumors) : nextRumors;
+    if (bounded.length !== s.rumors.length) {
+      nextSites[id] = { ...s, rumors: bounded };
+      changed = true;
+    }
+  }
+
+  return changed ? { ...world, sites: nextSites } : world;
+}
+
+export function spreadRumorsDaily(world: WorldState, rng: Rng): WorldState {
+  const cfg = getConfig();
+
+  // Per day: for each settlement, maybe spread one recent rumor to one neighboring site.
+  let nextWorld = world;
+  const chance = cfg.tuning.rumorSpreadChance ?? 0.15;
+  const mutateChance = cfg.tuning.rumorMutationChance ?? 0.1;
+
+  const settlementIds = Object.values(world.sites)
+    .filter(isSettlement)
+    .map((s) => s.id)
+    .sort();
+
+  for (const siteId of settlementIds) {
+    const s = nextWorld.sites[siteId];
+    if (!isSettlement(s) || !s.rumors?.length) continue;
+    if (!rng.chance(chance)) continue;
+
+    const neighbors = getNeighbors(nextWorld.map, siteId)
+      .map((e) => e.to)
+      .filter((to) => isSettlement(nextWorld.sites[to]));
+    if (!neighbors.length) continue;
+
+    const destId = neighbors[rng.int(0, neighbors.length - 1)]!;
+    const recent = s.rumors.slice(-20);
+    const picked = recent[rng.int(0, recent.length - 1)]!;
+
+    const mutated = rng.chance(mutateChance) ? mutateRumorLabel(picked) : picked.label;
+    const nextRumor: SiteRumor = {
+      ...picked,
+      tick: nextWorld.tick,
+      siteId: destId,
+      confidence: Math.max(10, Math.round(picked.confidence * 0.7)),
+      label: mutated
+    };
+
+    nextWorld = applyPublicRumorAndRelationships(nextWorld, nextRumor);
+  }
+
+  return nextWorld;
 }
 
 

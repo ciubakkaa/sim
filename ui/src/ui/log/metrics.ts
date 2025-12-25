@@ -1,5 +1,17 @@
 import type { SimEvent, WorldState } from "../../lib/protocol";
 
+export type EventCategory =
+  | "attempt"
+  | "world"
+  | "combat"
+  | "social"
+  | "mind"
+  | "economy"
+  | "faction"
+  | "narrative"
+  | "system"
+  | "other";
+
 export type AttemptLike = {
   id?: string;
   actorId?: string;
@@ -79,9 +91,33 @@ export function getPrimaryActorId(e: SimEvent): string | undefined {
 
 export function isMajorEvent(e: SimEvent): boolean {
   if (e.kind === "npc.died" || e.kind === "world.incident" || e.kind === "travel.encounter") return true;
+  if (e.kind === "chronicle.entry" || e.kind === "story.beat.detected") return true;
+  if (e.kind === "faction.operation.started" || e.kind === "faction.operation.completed" || e.kind === "faction.operation.failed") return true;
   const a = getAttempt(e);
   if (a?.intentMagnitude === "major") return true;
   return false;
+}
+
+export function eventCategory(kind: string): EventCategory {
+  // Most kinds are dot-separated; we keep this robust to unknown kinds.
+  if (kind.startsWith("attempt.")) return "attempt";
+  if (kind.startsWith("sim.")) return "system";
+
+  if (kind.startsWith("world.") || kind.startsWith("travel.") || kind.startsWith("local.")) return "world";
+  if (kind === "npc.died") return "world";
+
+  if (kind.startsWith("entity.memory.") || kind.startsWith("entity.emotion.") || kind.startsWith("entity.goal.") || kind.startsWith("entity.plan.")) return "mind";
+  if (kind.startsWith("entity.relationship.") || kind.startsWith("entity.debt.") || kind.startsWith("intent.")) return "social";
+  if (kind.startsWith("entity.knowledge.") || kind.startsWith("entity.secret.") || kind.startsWith("entity.rumor.")) return "mind";
+  if (kind.startsWith("entity.trade.") || kind.startsWith("entity.inventory.") || kind.startsWith("entity.wealth.")) return "economy";
+
+  if (kind.startsWith("faction.")) return "faction";
+
+  if (kind.startsWith("chronicle.") || kind.startsWith("narrative.") || kind.startsWith("story.")) return "narrative";
+
+  // Heuristic: common violent event kinds (v1) often appear as attempt kinds rather than event kinds,
+  // so "combat" remains mostly for future explicit combat event kinds.
+  return "other";
 }
 
 export function countBy<T extends string>(items: T[]): Record<string, number> {

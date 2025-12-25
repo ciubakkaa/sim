@@ -16,6 +16,8 @@ import type { Rng } from "./rng";
 import { isNpcTraveling } from "./movement";
 import { isDetained } from "./eclipsing";
 import { isBusy } from "./busy";
+import { getConfig } from "./config";
+import { getPersonalFoodTotal } from "./systems/inventory";
 
 export type ActiveSelection = {
   activeNpcIds: Set<NpcId>;
@@ -103,6 +105,14 @@ export function computeNpcNeeds(npc: NpcState, world: WorldState): Record<NeedKe
     const certainty = npc.traits.NeedForCertainty / 100;
     const anchorBlock = 1 - site.anchoringStrength / 100;
     needs.Meaning = clamp(Math.round(site.cultInfluence * certainty * (0.6 + anchorBlock * 0.4)), 0, 100);
+
+    // Personal food stash reduces Food pressure.
+    const personalFood = getPersonalFoodTotal(npc);
+    if (personalFood > 0) {
+      // Each unit reduces Food pressure a bit; cap so it doesn't fully zero out the system.
+      const reduction = clamp(Math.round(personalFood * 4), 0, 60);
+      needs.Food = clamp(needs.Food - reduction, 0, 100);
+    }
   } else {
     // In wilderness nodes: safety tends to be higher, shelter lower.
     needs.Safety = 45;

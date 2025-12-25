@@ -108,6 +108,11 @@ export function readRunSnapshot(snapshotPath: string): WorldSnapshot {
   return JSON.parse(raw) as WorldSnapshot;
 }
 
+export function readRunMeta(metaPath: string): RunMeta {
+  const raw = fs.readFileSync(metaPath, "utf8");
+  return JSON.parse(raw) as RunMeta;
+}
+
 export function listSeedRunIds(baseDir: string, seed: number): string[] {
   const seedDir = path.join(baseDir, `seed-${Math.floor(seed)}`);
   const runsDir = path.join(seedDir, "runs");

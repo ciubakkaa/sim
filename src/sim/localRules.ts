@@ -3,6 +3,8 @@ import type { FoodType, SettlementLocal } from "./types";
 
 export function locationKindsForAttempt(kind: AttemptKind, site: SettlementSiteState): LocationKind[] | undefined {
   switch (kind) {
+    case "recon":
+      return ["streets", "tavern", "market"];
     case "work_farm":
       return ["fields"];
     case "work_fish":
@@ -15,12 +17,16 @@ export function locationKindsForAttempt(kind: AttemptKind, site: SettlementSiteS
       return ["shrine", "market"];
     case "trade":
       return ["market"];
+    case "gossip":
+      return ["tavern", "market", "streets"];
     case "patrol":
     case "investigate":
     case "arrest":
       return ["guardhouse", "streets"];
     case "steal":
       return ["market", "streets", "storage"];
+    case "blackmail":
+      return ["streets", "tavern", "market"];
     case "assault":
     case "kill":
     case "kidnap":
