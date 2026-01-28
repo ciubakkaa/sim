@@ -5,3 +5,4 @@ dist-test/
 logs
 docs
 .kiro
+mcp/**/data/
